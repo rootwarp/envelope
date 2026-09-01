@@ -1,0 +1,30 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Tests / coverage
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Workspace
+go.work
+go.work.sum
+
+# Env / editor
+.env
+*.swo
+*.swp
+
+# Envelop secrets and local shards
+identity.txt
+*.identity
+AGE-SECRET-KEY-*
+shards/
+*.partial
