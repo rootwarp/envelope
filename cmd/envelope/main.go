@@ -1,11 +1,12 @@
 package main
 
 import (
-	"fmt"
+	"io"
 	"os"
 )
 
-func main() {
-	fmt.Fprintln(os.Stderr, "envelope: not implemented yet (see issues #2–#6)")
-	os.Exit(2)
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+func run(args []string, stdout, stderr io.Writer) int {
+	return 2
 }

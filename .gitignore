@@ -23,8 +23,10 @@ go.work.sum
 *.swp
 
 # Envelope secrets and local shards
-identity.txt
+identity*.txt
 *.identity
 AGE-SECRET-KEY-*
+*.age
+shard-*
 shards/
 *.partial
