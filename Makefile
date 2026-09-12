@@ -1,6 +1,6 @@
 .PHONY: build test lint fmt vet clean run tidy
 
-APP_NAME := envelop
+APP_NAME := envelope
 BUILD_DIR := bin
 
 build:

@@ -22,7 +22,7 @@ go.work.sum
 *.swo
 *.swp
 
-# Envelop secrets and local shards
+# Envelope secrets and local shards
 identity.txt
 *.identity
 AGE-SECRET-KEY-*
