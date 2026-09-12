@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Assert go.mod
+        run: |
+          grep -qx 'module github.com/rootwarp/envelope' go.mod
+          grep -qx 'go 1.26.5'                            go.mod
+          grep -qx 'toolchain go1.26.6'                   go.mod
+          grep -q  'filippo.io/age v1.3.1'                go.mod
+          grep -q  'github.com/klauspost/reedsolomon v1.14.2' go.mod
+          go list -m all | grep -q 'golang.org/x/crypto v0.45.0'
+
+      - name: Test
+        run: go test ./...
+
+      - name: Race
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          staticcheck ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
