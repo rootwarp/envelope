@@ -23,60 +23,9 @@ import (
 )
 
 func TestSplitRefusesNonEmptyOutDir(t *testing.T) {
-	tests := []struct {
-		name string
-		file string
-	}{
-		{name: "unrelated file", file: "notes.txt"},
-		{name: "prior manifest.age", file: "manifest.age"},
-		{name: "stale shard-07", file: "shard-07"},
-	}
-	for _, tt := range tests {
+	for _, tt := range fr31OccupiedCases {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, tt.file)
-			want := make([]byte, 32)
-			if _, err := rand.Read(want); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, want, 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			beforeNames, beforeContents := snapshotDir(t, dir)
-
-			_, err := Split(context.Background(), validOpts(t, dir), io.Discard)
-			if !errors.Is(err, ErrOutDirNotEmpty) {
-				t.Fatalf("errors.Is(., ErrOutDirNotEmpty) = false")
-			}
-			if !strings.Contains(err.Error(), dir) {
-				t.Fatalf("error does not name the directory")
-			}
-
-			afterNames, afterContents := snapshotDir(t, dir)
-			if len(afterNames) != len(beforeNames) {
-				t.Fatalf("listing length changed: got %d want %d", len(afterNames), len(beforeNames))
-			}
-			for i := range beforeNames {
-				if afterNames[i] != beforeNames[i] {
-					t.Fatalf("listing changed: got %v want %v", afterNames, beforeNames)
-				}
-			}
-			if len(afterContents) != len(beforeContents) {
-				t.Fatalf("new file was written")
-			}
-			for name, before := range beforeContents {
-				got, ok := afterContents[name]
-				if !ok {
-					t.Fatalf("%s missing after Split", name)
-				}
-				assertSameBytes(t, got, before)
-			}
-			got, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertSameBytes(t, got, want)
+			assertSplitRefusesOccupied(t, tt.file)
 		})
 	}
 }
@@ -432,6 +381,161 @@ func TestSplitShardExclusive(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSameBytes(t, got, want)
+}
+
+func TestMarkerAbsentFromEveryShard(t *testing.T) {
+	out, n, marker := splitMarkedInput(t)
+	for i := 0; i < n; i++ {
+		got, err := os.ReadFile(filepath.Join(out, shardFileName(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(got, marker) {
+			t.Errorf("marker present in shard %d", i)
+		}
+	}
+}
+
+func TestMarkerAbsentFromManifest(t *testing.T) {
+	out, _, marker := splitMarkedInput(t)
+	got, err := os.ReadFile(filepath.Join(out, "manifest.age"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(got, marker) {
+		t.Error("marker present in manifest")
+	}
+}
+
+func TestSplitEndToEndRefusals(t *testing.T) {
+	for _, tt := range fr31OccupiedCases {
+		t.Run(tt.name, func(t *testing.T) {
+			assertSplitRefusesOccupied(t, tt.file)
+		})
+	}
+
+	t.Run("missing out dir", func(t *testing.T) {
+		out := filepath.Join(t.TempDir(), "out")
+		opts := validOpts(t, out)
+		if _, err := Split(context.Background(), opts, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		fi, err := os.Stat(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fi.Mode().Perm(); got != 0o700 {
+			t.Fatalf("perm = %04o, want 0700", got)
+		}
+		assertSplitArtifacts(t, out, opts.N)
+	})
+
+	t.Run("empty out dir", func(t *testing.T) {
+		out := t.TempDir()
+		opts := validOpts(t, out)
+		if _, err := Split(context.Background(), opts, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		assertSplitArtifacts(t, out, opts.N)
+	})
+}
+
+var fr31OccupiedCases = []struct {
+	name string
+	file string
+}{
+	{name: "unrelated file", file: "notes.txt"},
+	{name: "prior manifest.age", file: "manifest.age"},
+	{name: "stale shard-07", file: "shard-07"},
+}
+
+func assertSplitRefusesOccupied(t *testing.T, occupant string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, occupant)
+	want := make([]byte, 32)
+	if _, err := rand.Read(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeNames, beforeContents := snapshotDir(t, dir)
+
+	_, err := Split(context.Background(), validOpts(t, dir), io.Discard)
+	if !errors.Is(err, ErrOutDirNotEmpty) {
+		t.Fatalf("errors.Is(., ErrOutDirNotEmpty) = false")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Fatalf("error does not name the directory")
+	}
+
+	afterNames, afterContents := snapshotDir(t, dir)
+	if len(afterNames) != len(beforeNames) {
+		t.Fatalf("listing length changed: got %d want %d", len(afterNames), len(beforeNames))
+	}
+	for i := range beforeNames {
+		if afterNames[i] != beforeNames[i] {
+			t.Fatalf("listing changed: got %v want %v", afterNames, beforeNames)
+		}
+	}
+	if len(afterContents) != len(beforeContents) {
+		t.Fatalf("new file was written")
+	}
+	for name, before := range beforeContents {
+		got, ok := afterContents[name]
+		if !ok {
+			t.Fatalf("%s missing after Split", name)
+		}
+		assertSameBytes(t, got, before)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+}
+
+func splitMarkedInput(t *testing.T) (out string, n int, marker []byte) {
+	t.Helper()
+	marker = make([]byte, 32)
+	if _, err := rand.Read(marker); err != nil {
+		t.Fatal(err)
+	}
+	out = t.TempDir()
+	opts := validOpts(t, out)
+	in := make([]byte, 4096)
+	if _, err := rand.Read(in); err != nil {
+		t.Fatal(err)
+	}
+	copy(in[1024:], marker)
+	if err := os.WriteFile(opts.InPath, in, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(opts.InPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(written, marker) {
+		t.Fatal("marker missing from input")
+	}
+	if _, err := Split(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return out, opts.N, marker
+}
+
+func assertSplitArtifacts(t *testing.T, dir string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := os.Stat(filepath.Join(dir, shardFileName(i))); err != nil {
+			t.Fatalf("%s missing", shardFileName(i))
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "manifest.age")); err != nil {
+		t.Fatal("manifest.age missing")
+	}
 }
 
 func validOpts(t *testing.T, outDir string) SplitOptions {
