@@ -445,6 +445,172 @@ func TestJoinUsesManifestLength(t *testing.T) {
 	}
 }
 
+func TestRestoreWithTwoShardsDeleted(t *testing.T) {
+	restore, _, want := splitSized(t, 1<<20)
+	removeShardFiles(t, restore.InDir, 3, 4)
+
+	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+}
+
+func TestRestoreWithThreeShardsDeleted(t *testing.T) {
+	restore, _, _ := splitSized(t, 4096)
+	removeShardFiles(t, restore.InDir, 0, 1, 2)
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	assertTooFewShards(t, err, 3, 2)
+	assertPathAbsent(t, restore.OutPath)
+	assertPathAbsent(t, restore.OutPath+".partial")
+}
+
+func TestRestoreFromNonContiguousSurvivors(t *testing.T) {
+	restore, _, want := splitSized(t, 1<<20)
+	removeShardFiles(t, restore.InDir, 1, 3)
+
+	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+}
+
+func TestRestoreWithOneCorruptShard(t *testing.T) {
+	restore, _, want := splitSized(t, 1<<20)
+	const idx, offset = 2, 0
+	flipFileByte(t, filepath.Join(restore.InDir, shardFileName(idx)), offset)
+
+	rep, err := Restore(context.Background(), restore, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+	if rep == nil {
+		t.Fatal("report is nil")
+	}
+	if len(rep.FailedIndex) != 1 || rep.FailedIndex[0] != idx {
+		t.Fatalf("FailedIndex = %v, want [%d]", rep.FailedIndex, idx)
+	}
+}
+
+func TestRestoreWithThreeCorruptShards(t *testing.T) {
+	restore, _, _ := splitSized(t, 4096)
+	const offset = 0
+	for _, i := range []int{0, 1, 2} {
+		flipFileByte(t, filepath.Join(restore.InDir, shardFileName(i)), offset)
+	}
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	assertTooFewShards(t, err, 3, 2)
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestRestoreWrongIdentityEndToEnd(t *testing.T) {
+	restore, _, _ := splitSized(t, 4096)
+	other := filepath.Join(t.TempDir(), "identity.txt")
+	if _, err := key.Create(other); err != nil {
+		t.Fatal(err)
+	}
+	restore.IdentityPath = other
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want error")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestRestoreTamperedMACEndToEnd(t *testing.T) {
+	restore, _, _ := splitSized(t, 4096)
+	// Reconstruction is the first step that could emit plaintext; it must not run.
+	reconstructed := false
+	testAtReconstruct = func([][]byte) { reconstructed = true }
+	t.Cleanup(func() { testAtReconstruct = nil })
+
+	p := filepath.Join(restore.InDir, "manifest.age")
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipFileByte(t, p, int(fi.Size())/2)
+
+	_, err = Restore(context.Background(), restore, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want error")
+	}
+	if reconstructed {
+		t.Fatal("reconstruction ran")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*testing.T, *RestoreOptions)
+	}{
+		{
+			name: "three shards deleted",
+			mutate: func(t *testing.T, restore *RestoreOptions) {
+				removeShardFiles(t, restore.InDir, 0, 1, 2)
+			},
+		},
+		{
+			name: "three corrupt shards",
+			mutate: func(t *testing.T, restore *RestoreOptions) {
+				for _, i := range []int{0, 1, 2} {
+					flipFileByte(t, filepath.Join(restore.InDir, shardFileName(i)), 0)
+				}
+			},
+		},
+		{
+			name: "wrong identity",
+			mutate: func(t *testing.T, restore *RestoreOptions) {
+				other := filepath.Join(t.TempDir(), "identity.txt")
+				if _, err := key.Create(other); err != nil {
+					t.Fatal(err)
+				}
+				restore.IdentityPath = other
+			},
+		},
+		{
+			name: "tampered MAC",
+			mutate: func(t *testing.T, restore *RestoreOptions) {
+				p := filepath.Join(restore.InDir, "manifest.age")
+				fi, err := os.Stat(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				flipFileByte(t, p, int(fi.Size())/2)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restore, marker := splitMarkedRestore(t)
+			tc.mutate(t, &restore)
+			_, err := Restore(context.Background(), restore, io.Discard)
+			if err == nil {
+				t.Fatal("err = nil, want error")
+			}
+			assertNoOutOrPartial(t, restore.OutPath)
+			assertMarkerAbsentUnder(t, restore.InDir, marker)
+			assertMarkerAbsentUnder(t, filepath.Dir(restore.OutPath), marker)
+		})
+	}
+}
+
 func assertRestoreRoundTrip(t *testing.T, size int) {
 	t.Helper()
 	restore, _, want := splitSized(t, size)
@@ -552,5 +718,90 @@ func assertPathAbsent(t *testing.T, path string) {
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Lstat %s: %v", path, err)
+	}
+}
+
+func removeShardFiles(t *testing.T, dir string, indices ...int) {
+	t.Helper()
+	for _, i := range indices {
+		if err := os.Remove(filepath.Join(dir, shardFileName(i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func flipFileByte(t *testing.T, path string, offset int) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset < 0 || offset >= len(b) {
+		t.Fatalf("offset %d out of range (len %d)", offset, len(b))
+	}
+	b[offset] ^= 0x01
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertTooFewShards(t *testing.T, err error, need, have int) {
+	t.Helper()
+	var tf *erasure.TooFewShardsError
+	if !errors.As(err, &tf) {
+		t.Fatalf("errors.As(., *TooFewShardsError) = false")
+	}
+	if tf.Need != need || tf.Have != have {
+		t.Fatalf("Need=%d Have=%d, want %d, %d", tf.Need, tf.Have, need, have)
+	}
+}
+
+func splitMarkedRestore(t *testing.T) (RestoreOptions, []byte) {
+	t.Helper()
+	marker := make([]byte, 32)
+	if _, err := rand.Read(marker); err != nil {
+		t.Fatal(err)
+	}
+	in := make([]byte, 4096)
+	if _, err := rand.Read(in); err != nil {
+		t.Fatal(err)
+	}
+	copy(in[1024:], marker)
+
+	outDir := t.TempDir()
+	split := validOpts(t, outDir)
+	if err := os.WriteFile(split.InPath, in, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Split(context.Background(), split, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return RestoreOptions{
+		IdentityPath: split.IdentityPath,
+		InDir:        outDir,
+		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+	}, marker
+}
+
+func assertMarkerAbsentUnder(t *testing.T, dir string, marker []byte) {
+	t.Helper()
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		if bytes.Contains(b, marker) {
+			t.Errorf("marker present in %s", d.Name())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
