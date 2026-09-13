@@ -32,10 +32,16 @@ type SplitReport struct {
 	StripeLen     int64
 }
 
+// ValidateKN is erasure.Validate, exported so cmd can map (k, n) failures
+// to usage without importing erasure (D3).
+func ValidateKN(k, n int) error {
+	return erasure.Validate(k, n)
+}
+
 func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitReport, error) {
 	// Validate before any filesystem call so a bad (k, n) cannot leave a
 	// half-created directory.
-	if err := erasure.Validate(opts.K, opts.N); err != nil {
+	if err := ValidateKN(opts.K, opts.N); err != nil {
 		return nil, err
 	}
 
