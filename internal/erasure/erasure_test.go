@@ -2,8 +2,11 @@ package erasure
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,4 +191,174 @@ func TestValidate(t *testing.T) {
 	if allocs != 0 {
 		t.Fatalf("Validate allocated %.2f times per run, want 0", allocs)
 	}
+}
+
+var splitCases = []struct {
+	k, n, ctLen int
+}{
+	{1, 2, 1},
+	{1, 2, 7},
+	{3, 4, 3},
+	{3, 5, 3},
+	{3, 5, 4},  // does not divide
+	{3, 5, 10}, // does not divide
+	{3, 5, 184},
+	{5, 8, 17}, // does not divide
+	{7, 10, 100},
+	{128, 256, 200}, // does not divide; FR-7 boundary
+}
+
+func TestSplitStripeLen(t *testing.T) {
+	for _, tt := range splitCases {
+		t.Run(fmt.Sprintf("(%d,%d)/len=%d", tt.k, tt.n, tt.ctLen), func(t *testing.T) {
+			shards, stripeLen := mustSplit(t, tt.k, tt.n, tt.ctLen)
+			want := (int64(tt.ctLen) + int64(tt.k) - 1) / int64(tt.k)
+			if stripeLen != want {
+				t.Fatalf("stripeLen = %d, want ceil(%d/%d) = %d", stripeLen, tt.ctLen, tt.k, want)
+			}
+			for i, shard := range shards {
+				if int64(len(shard)) != stripeLen {
+					t.Fatalf("len(shards[%d]) = %d, want stripeLen %d", i, len(shard), stripeLen)
+				}
+			}
+		})
+	}
+}
+
+func TestSplitLenShards(t *testing.T) {
+	for _, tt := range splitCases {
+		t.Run(fmt.Sprintf("(%d,%d)/len=%d", tt.k, tt.n, tt.ctLen), func(t *testing.T) {
+			shards, _ := mustSplit(t, tt.k, tt.n, tt.ctLen)
+			if len(shards) != tt.n {
+				t.Fatalf("len(shards) = %d, want n=%d", len(shards), tt.n)
+			}
+		})
+	}
+}
+
+func TestSplitEncodesParity(t *testing.T) {
+	for _, tt := range splitCases {
+		t.Run(fmt.Sprintf("(%d,%d)/len=%d", tt.k, tt.n, tt.ctLen), func(t *testing.T) {
+			e, err := New(tt.k, tt.n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ct := make([]byte, tt.ctLen)
+			if _, err := rand.Read(ct); err != nil {
+				t.Fatal(err)
+			}
+			ct[0] |= 1 // all-zero input encodes to all-zero parity, matching the unencoded zeros
+			raw, err := e.enc.Split(bytes.Clone(ct))
+			if err != nil {
+				t.Fatal(err)
+			}
+			shards, _, err := e.Split(ct)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := e.K(); i < e.N(); i++ {
+				if bytes.Equal(shards[i], raw[i]) {
+					t.Fatalf("parity shard %d matches library Split without Encode", i)
+				}
+			}
+		})
+	}
+}
+
+func TestSplitCiphertextTooShort(t *testing.T) {
+	tests := []struct {
+		k, n, ctLen int
+	}{
+		{3, 5, 0},
+		{3, 5, 1},
+		{3, 5, 2},
+		{5, 8, 4},
+		{1, 2, 0},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("(%d,%d)/len=%d", tt.k, tt.n, tt.ctLen), func(t *testing.T) {
+			e, err := New(tt.k, tt.n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ct := make([]byte, tt.ctLen)
+			shards, stripeLen, err := e.Split(ct)
+			if shards != nil || stripeLen != 0 {
+				t.Fatalf("Split returned %d shards, stripeLen=%d; want nil, 0", len(shards), stripeLen)
+			}
+			if !errors.Is(err, ErrCiphertextTooShort) {
+				t.Fatalf("errors.Is(., ErrCiphertextTooShort) = false")
+			}
+			if errors.Is(err, reedsolomon.ErrShortData) {
+				t.Fatal("reedsolomon.ErrShortData escaped")
+			}
+		})
+	}
+}
+
+func TestDigestMatchesSHA256(t *testing.T) {
+	for _, n := range []int{0, 1, 31, 32, 33, 64, 1024} {
+		t.Run(fmt.Sprintf("len=%d", n), func(t *testing.T) {
+			shard := make([]byte, n)
+			if _, err := rand.Read(shard); err != nil {
+				t.Fatal(err)
+			}
+			got := Digest(shard)
+			if len(got) != DigestLen {
+				t.Fatalf("Digest len = %d, want %d", len(got), DigestLen)
+			}
+			want := sha256.Sum256(shard)
+			assertSameBytes(t, got, want[:])
+		})
+	}
+}
+
+func TestNewDigestComposesWithMultiWriter(t *testing.T) {
+	for _, n := range []int{0, 1, 1024} {
+		t.Run(fmt.Sprintf("len=%d", n), func(t *testing.T) {
+			shard := make([]byte, n)
+			if _, err := rand.Read(shard); err != nil {
+				t.Fatal(err)
+			}
+			h := NewDigest()
+			if _, err := io.MultiWriter(io.Discard, h).Write(shard); err != nil {
+				t.Fatal(err)
+			}
+			assertSameBytes(t, h.Sum(nil), Digest(shard))
+		})
+	}
+}
+
+func mustSplit(t *testing.T, k, n, ctLen int) ([][]byte, int64) {
+	t.Helper()
+	e, err := New(k, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct := make([]byte, ctLen)
+	if _, err := rand.Read(ct); err != nil {
+		t.Fatal(err)
+	}
+	shards, stripeLen, err := e.Split(ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return shards, stripeLen
+}
+
+// assertSameBytes compares payloads without ever putting them in the log.
+func assertSameBytes(t *testing.T, got, want []byte) {
+	t.Helper()
+	if bytes.Equal(got, want) {
+		return
+	}
+	off := -1
+	for i := 0; i < min(len(got), len(want)); i++ {
+		if got[i] != want[i] {
+			off = i
+			break
+		}
+	}
+	t.Errorf("payload mismatch: len got=%d want=%d, first diff at %d, sha256 got=%x want=%x",
+		len(got), len(want), off, sha256.Sum256(got), sha256.Sum256(want))
 }
