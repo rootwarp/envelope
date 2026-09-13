@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
+	"math"
 
 	"github.com/klauspost/reedsolomon"
 )
@@ -33,6 +35,8 @@ var (
 	ErrTooManyShards      = errors.New("n must not exceed 256")
 	ErrShardSizeMultiple  = errors.New("encoder selected a codec with ShardSizeMultiple != 1")
 	ErrCiphertextTooShort = errors.New("ciphertext is shorter than k bytes")
+	ErrWrongSliceLength   = errors.New("reconstruct slice length must equal n")
+	ErrOutSizeRange       = errors.New("join outSize must be non-negative and fit in int")
 )
 
 // Validate applies FR-7's rules with no allocation, so the CLI can reject bad
@@ -111,4 +115,87 @@ func NewDigest() hash.Hash {
 func Digest(shard []byte) []byte {
 	sum := sha256.Sum256(shard)
 	return sum[:]
+}
+
+// Reconstruct asserts len(shards) == n, counts usable shards itself, and
+// returns *TooFewShardsError below k before calling the library. FR-15, FR-16.
+// It uses ReconstructData (data shards only); the library Reconstruct rebuilds
+// parity that Join never reads.
+func (e *Encoder) Reconstruct(shards [][]byte) error {
+	if len(shards) != e.n {
+		return ErrWrongSliceLength
+	}
+	have := Usable(shards)
+	if have < e.k {
+		return &TooFewShardsError{Need: e.k, Have: have}
+	}
+	if err := e.enc.ReconstructData(shards); err != nil {
+		// ErrTooFewShards also means "wrong length, including too many"; never let it escape.
+		if errors.Is(err, reedsolomon.ErrTooFewShards) {
+			return &TooFewShardsError{Need: e.k, Have: have}
+		}
+		return fmt.Errorf("reedsolomon: %w", err)
+	}
+	return nil
+}
+
+// Join narrows outSize to int with an explicit range check and calls the
+// library's Join, which reads only shards[:k]. A data shard with len==0
+// (Erase or absent) fails closed: Reconstruct must run first. FR-17.
+func (e *Encoder) Join(dst io.Writer, shards [][]byte, outSize int64) error {
+	if outSize < 0 || outSize > int64(math.MaxInt) {
+		return ErrOutSizeRange
+	}
+	if len(shards) != e.n {
+		return ErrWrongSliceLength
+	}
+	have := Usable(shards)
+	if have < e.k {
+		return &TooFewShardsError{Need: e.k, Have: have}
+	}
+	// Library Join treats only nil as missing. Erase uses [:0] to donate the
+	// buffer, which Join would take as a zero-length data shard and emit
+	// shifted bytes. Fail closed unless every data shard has been filled.
+	for i := 0; i < e.k; i++ {
+		if len(shards[i]) == 0 {
+			return fmt.Errorf("reedsolomon: %w", reedsolomon.ErrReconstructRequired)
+		}
+	}
+	if err := e.enc.Join(dst, shards, int(outSize)); err != nil {
+		if errors.Is(err, reedsolomon.ErrTooFewShards) {
+			return &TooFewShardsError{Need: e.k, Have: have}
+		}
+		return fmt.Errorf("reedsolomon: %w", err)
+	}
+	return nil
+}
+
+// Erase marks index i as an erasure. A present-but-corrupt shard is truncated
+// to shards[i][:0], donating its buffer back to the reconstructor; an absent
+// shard has no buffer and stays nil. Both are len == 0, which is what the
+// library reads. FR-14.
+func Erase(shards [][]byte, i int) {
+	if shards[i] != nil {
+		shards[i] = shards[i][:0]
+	}
+}
+
+// Usable counts entries with len > 0. nil and [:0] are identical. FR-16.
+func Usable(shards [][]byte) int {
+	n := 0
+	for _, s := range shards {
+		if len(s) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// TooFewShardsError is a type, not a sentinel: FR-26 needs the two counts in
+// the message, and pipeline branches on Have == 0 for the stale-manifest
+// diagnosis.
+type TooFewShardsError struct{ Need, Have int }
+
+func (e *TooFewShardsError) Error() string {
+	return fmt.Sprintf("need at least %d usable shards, have %d", e.Need, e.Have)
 }

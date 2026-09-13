@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -327,6 +328,245 @@ func TestNewDigestComposesWithMultiWriter(t *testing.T) {
 			assertSameBytes(t, h.Sum(nil), Digest(shard))
 		})
 	}
+}
+
+func TestReconstructWrongSliceLength(t *testing.T) {
+	e, err := New(3, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{4, 6} { // short and over-long
+		t.Run(fmt.Sprintf("len=%d", n), func(t *testing.T) {
+			err := e.Reconstruct(make([][]byte, n))
+			if !errors.Is(err, ErrWrongSliceLength) {
+				t.Fatalf("errors.Is(., ErrWrongSliceLength) = false")
+			}
+			if errors.Is(err, reedsolomon.ErrTooFewShards) {
+				t.Fatal("reedsolomon.ErrTooFewShards escaped")
+			}
+		})
+	}
+}
+
+func TestTooFewShardsMessage(t *testing.T) {
+	e, _, shards := splitRandom(t, 3, 5, 64)
+	got := append([][]byte(nil), shards...)
+	got[0], got[1], got[2] = nil, nil, nil // 2 usable at original indices
+	err := e.Reconstruct(got)
+	var tf *TooFewShardsError
+	if !errors.As(err, &tf) {
+		t.Fatalf("errors.As(., *TooFewShardsError) = false")
+	}
+	if tf.Need != 3 || tf.Have != 2 {
+		t.Fatalf("Need=%d Have=%d, want 3, 2", tf.Need, tf.Have)
+	}
+	const want = "need at least 3 usable shards, have 2"
+	if err.Error() != want {
+		t.Fatalf("Error() = %q, want %q", err.Error(), want)
+	}
+	if errors.Is(err, reedsolomon.ErrTooFewShards) {
+		t.Fatal("reedsolomon.ErrTooFewShards in chain")
+	}
+}
+
+func TestReconstructFromSurvivorsAtOriginalIndices(t *testing.T) {
+	e, ct, shards := splitRandom(t, 3, 5, 64)
+	got := append([][]byte(nil), shards...)
+	got[1], got[3] = nil, nil // 0, 2, 4 present; do not compact
+	if len(got) != 5 {
+		t.Fatalf("len(shards) = %d, want n=5", len(got))
+	}
+	if err := e.Reconstruct(got); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := e.Join(&buf, got, int64(len(ct))); err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, buf.Bytes(), ct)
+}
+
+func TestEraseCorruptDonatesBuffer(t *testing.T) {
+	e, ct, shards := splitRandom(t, 3, 5, 64)
+	Erase(shards, 0)
+	if shards[0] == nil {
+		t.Fatal("present shard became nil")
+	}
+	if len(shards[0]) != 0 {
+		t.Fatalf("len(present after Erase) = %d, want 0", len(shards[0]))
+	}
+	if cap(shards[0]) == 0 {
+		t.Fatal("cap(present after Erase) = 0, want > 0")
+	}
+
+	shards[1] = nil
+	Erase(shards, 1)
+	if shards[1] != nil {
+		t.Fatal("absent shard is not nil")
+	}
+	if len(shards[1]) != 0 {
+		t.Fatalf("len(nil after Erase) = %d, want 0", len(shards[1]))
+	}
+
+	if err := e.Reconstruct(shards); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := e.Join(&buf, shards, int64(len(ct))); err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, buf.Bytes(), ct)
+}
+
+func TestEraseSetsNotAccumulates(t *testing.T) {
+	e, ct, shards := splitRandom(t, 3, 5, 64)
+	orig := bytes.Clone(shards[0])
+	for i := range shards[0] {
+		shards[0][i] = 0xaa
+	}
+	Erase(shards, 0)
+	if err := e.Reconstruct(shards); err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, shards[0], orig)
+
+	var buf bytes.Buffer
+	if err := e.Join(&buf, shards, int64(len(ct))); err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, buf.Bytes(), ct)
+}
+
+func TestUsableCountsNonEmpty(t *testing.T) {
+	empty := make([]byte, 0, 16)
+	shards := [][]byte{
+		nil,
+		empty,
+		{1},
+		{1, 2},
+		{},
+	}
+	if got := Usable(shards); got != 2 {
+		t.Fatalf("Usable = %d, want 2", got)
+	}
+	if got := Usable(nil); got != 0 {
+		t.Fatalf("Usable(nil) = %d, want 0", got)
+	}
+}
+
+func TestJoinRangeCheck(t *testing.T) {
+	e, err := New(3, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shards := make([][]byte, 5)
+	for i := range shards {
+		shards[i] = []byte{1}
+	}
+	var buf bytes.Buffer
+	err = e.Join(&buf, shards, -1)
+	if err == nil {
+		t.Fatal("negative outSize: err = nil")
+	}
+	if !errors.Is(err, ErrOutSizeRange) {
+		t.Fatalf("negative: errors.Is(., ErrOutSizeRange) = false")
+	}
+
+	// int64 cannot hold MaxInt+1 on 64-bit; the overflow case is 32-bit only.
+	maxInt := math.MaxInt
+	if int64(maxInt) < math.MaxInt64 {
+		err = e.Join(&buf, shards, int64(maxInt)+1)
+		if err == nil {
+			t.Fatal("outSize > MaxInt: err = nil")
+		}
+		if !errors.Is(err, ErrOutSizeRange) {
+			t.Fatalf(">MaxInt: errors.Is(., ErrOutSizeRange) = false")
+		}
+	}
+}
+
+func TestJoinRejectsErasedDataShard(t *testing.T) {
+	for _, tt := range []struct{ k, n, ctLen int }{
+		{3, 5, 4},
+		{32, 33, 184},
+	} {
+		t.Run(fmt.Sprintf("(%d,%d)/len=%d", tt.k, tt.n, tt.ctLen), func(t *testing.T) {
+			e, ct, shards := splitRandom(t, tt.k, tt.n, tt.ctLen)
+			Erase(shards, 0) // data index; [:0] is not nil
+			var buf bytes.Buffer
+			err := e.Join(&buf, shards, int64(len(ct)))
+			if err == nil {
+				t.Fatal("Join after Erase without Reconstruct: err = nil")
+			}
+			if buf.Len() != 0 {
+				t.Fatalf("Join wrote %d bytes after error, want 0", buf.Len())
+			}
+		})
+	}
+}
+
+func TestJoinExactLength(t *testing.T) {
+	e, ct, shards := splitRandom(t, 3, 5, 10) // does not divide by k
+	for lost := 0; lost <= 3; lost++ {
+		t.Run(fmt.Sprintf("lost=%d", lost), func(t *testing.T) {
+			got := append([][]byte(nil), shards...)
+			for i := 0; i < lost; i++ {
+				got[i] = nil
+			}
+			err := e.Reconstruct(got)
+			if lost == 3 {
+				var tf *TooFewShardsError
+				if !errors.As(err, &tf) {
+					t.Fatalf("errors.As(., *TooFewShardsError) = false")
+				}
+				if tf.Need != 3 || tf.Have != 2 {
+					t.Fatalf("Need=%d Have=%d, want 3, 2", tf.Need, tf.Have)
+				}
+				if errors.Is(err, reedsolomon.ErrTooFewShards) {
+					t.Fatal("reedsolomon.ErrTooFewShards in chain")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			if err := e.Join(&buf, got, int64(len(ct))); err != nil {
+				t.Fatal(err)
+			}
+			assertSameBytes(t, buf.Bytes(), ct)
+		})
+	}
+}
+
+func TestReconstructUsesReconstructData(t *testing.T) {
+	src, err := os.ReadFile("erasure.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := bytes.Count(src, []byte("ReconstructData")); c < 1 {
+		t.Fatalf("ReconstructData count = %d, want >= 1", c)
+	}
+	if bytes.Contains(src, []byte(".Reconstruct(")) {
+		t.Fatal("library Reconstruct( appears in erasure.go")
+	}
+}
+
+func splitRandom(t *testing.T, k, n, ctLen int) (*Encoder, []byte, [][]byte) {
+	t.Helper()
+	e, err := New(k, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct := make([]byte, ctLen)
+	if _, err := rand.Read(ct); err != nil {
+		t.Fatal(err)
+	}
+	shards, _, err := e.Split(bytes.Clone(ct))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e, ct, shards
 }
 
 func mustSplit(t *testing.T, k, n, ctLen int) ([][]byte, int64) {
