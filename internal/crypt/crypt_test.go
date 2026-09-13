@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -219,6 +220,85 @@ func TestEncryptBytesDecryptBytesRoundTrip(t *testing.T) {
 	assertSameBytes(t, got, plain)
 }
 
+func TestCloselessCiphertextFailsDecrypt(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Below one STREAM chunk, skipped Close writes only the header. Decrypt
+	// then cannot emit authentic plaintext a caller could take as success.
+	payload := make([]byte, 64)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build ciphertext the wrong way on purpose: write N bytes through age.Encrypt and
+	// never Close. The tail — including the final chunk's Poly1305 tag — is missing.
+	var buf bytes.Buffer
+	w, err := age.Encrypt(&buf, id.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(w, bytes.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	// NO w.Close() — this is the bug being guarded against.
+
+	var dst bytes.Buffer
+	_, decErr := Decrypt(&dst, bytes.NewReader(buf.Bytes()), id)
+
+	t.Run("decrypt returns an error", func(t *testing.T) {
+		if decErr == nil {
+			t.Fatal("Decrypt closeless ciphertext: err = nil, want error")
+		}
+	})
+	t.Run("dst is not a valid prefix", func(t *testing.T) {
+		got := dst.Bytes()
+		if len(got) > 0 && bytes.HasPrefix(payload, got) {
+			t.Fatalf("Decrypt wrote %d-byte plaintext prefix, want no plausible plaintext", len(got))
+		}
+	})
+
+	var full bytes.Buffer
+	n, err := Encrypt(&full, bytes.NewReader(payload), id.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n <= int64(buf.Len()) {
+		t.Fatalf("Encrypt n = %d, closeless count = %d, want n larger (missing tail)", n, buf.Len())
+	}
+}
+
+func TestCloseErrorPropagates(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := make([]byte, 31)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatal(err)
+	}
+	L := len(payload)
+
+	// 70 + 98*r + 16 + L + 16*ceil(L/65536), for r recipients and L plaintext bytes.
+	// Computed, not guessed: a 250-byte limit against a 31-byte payload produced no error
+	// at all, because the total output was only 231 bytes.
+	limit := 70 + 98*1 + 16 + L + 16*((L+65535)/65536) - 1
+
+	n, err := Encrypt(&failingWriter{limit: limit}, bytes.NewReader(payload), id.Recipient())
+	if err == nil {
+		t.Fatalf("Encrypt: err = nil, n = %d; want age close error", n)
+	}
+	if !strings.Contains(err.Error(), "age close:") {
+		t.Fatalf("Encrypt error missing %q in chain", "age close:")
+	}
+	if n > int64(limit) {
+		t.Fatalf("Encrypt n = %d, want <= limit %d (not a complete write)", n, limit)
+	}
+}
+
 type writeRecorder struct {
 	n    int64
 	last int64
@@ -227,6 +307,27 @@ type writeRecorder struct {
 func (w *writeRecorder) Write(p []byte) (int, error) {
 	w.last = int64(len(p))
 	w.n += w.last
+	return len(p), nil
+}
+
+var errWriteLimit = errors.New("write limit")
+
+// failingWriter errors once n reaches limit. A bytes.Buffer never errors, so it
+// cannot exercise Encrypt's Close-error path.
+type failingWriter struct {
+	n, limit int
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.n >= w.limit {
+		return 0, errWriteLimit
+	}
+	remain := w.limit - w.n
+	if len(p) > remain {
+		w.n += remain
+		return remain, errWriteLimit
+	}
+	w.n += len(p)
 	return len(p), nil
 }
 
