@@ -5,9 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
+
+	"filippo.io/age"
+
+	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/key"
 )
 
 func TestMACInputGoldenVector(t *testing.T) {
@@ -225,4 +231,218 @@ func shaped(k, n int) *Manifest {
 		m.Digests[i] = make([]byte, DigestLen)
 	}
 	return m
+}
+
+func TestSealOpenRoundTrip(t *testing.T) {
+	macKey, id, r := testKey(t)
+	want := golden35()
+	blob, err := Seal(want, macKey, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blob) == 0 {
+		t.Fatal("Seal returned empty blob")
+	}
+	got, err := Open(blob, macKey, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertManifestEqual(t, got, want)
+}
+
+func TestOpenRejectsReorderedDigests(t *testing.T) {
+	fx := sealedGolden(t)
+	blob := resealJSON(t, fx, func(m *Manifest) {
+		m.Digests[0], m.Digests[1] = m.Digests[1], m.Digests[0]
+	})
+	got, err := Open(blob, fx.macKey, fx.id)
+	assertOpenErr(t, got, err, ErrMACMismatch)
+}
+
+func TestOpenRejectsAlteredDigestByte(t *testing.T) {
+	fx := sealedGolden(t)
+	blob := resealJSON(t, fx, func(m *Manifest) {
+		d := append([]byte{}, m.Digests[0]...)
+		d[0] ^= 0xff
+		m.Digests[0] = d
+	})
+	got, err := Open(blob, fx.macKey, fx.id)
+	assertOpenErr(t, got, err, ErrMACMismatch)
+}
+
+func TestOpenRejectsForeignMACKey(t *testing.T) {
+	fx := sealedGolden(t)
+	foreign, _, _ := testKey(t)
+	if hmac.Equal(foreign, fx.macKey) {
+		t.Fatal("foreign MAC key collided with sealed key")
+	}
+	got, err := Open(fx.blob, foreign, fx.id)
+	assertOpenErr(t, got, err, ErrMACMismatch)
+}
+
+func TestOpenRejectsDroppedDigestBeforeMAC(t *testing.T) {
+	t.Run("drop digest", func(t *testing.T) {
+		fx := sealedGolden(t)
+		blob := resealJSON(t, fx, func(m *Manifest) {
+			m.Digests = m.Digests[:len(m.Digests)-1]
+		})
+		got, err := Open(blob, fx.macKey, fx.id)
+		assertOpenErr(t, got, err, ErrMalformed)
+	})
+	t.Run("drop digest and lower n", func(t *testing.T) {
+		fx := sealedGolden(t)
+		blob := resealJSON(t, fx, func(m *Manifest) {
+			m.Digests = m.Digests[:len(m.Digests)-1]
+			m.N = len(m.Digests)
+		})
+		got, err := Open(blob, fx.macKey, fx.id)
+		assertOpenErr(t, got, err, ErrMACMismatch)
+	})
+}
+
+func TestOpenInconsistentIsNotMACMismatch(t *testing.T) {
+	macKey, id, r := testKey(t)
+	m := golden35()
+	m.StripeLen++
+	blob, err := Seal(m, macKey, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Open(blob, macKey, id)
+	assertOpenErr(t, got, err, ErrInconsistent)
+}
+
+func TestOpenRejectsVersionBump(t *testing.T) {
+	fx := sealedGolden(t)
+	blob := resealJSON(t, fx, func(m *Manifest) {
+		m.Version = 2
+	})
+	got, err := Open(blob, fx.macKey, fx.id)
+	assertOpenErr(t, got, err, ErrUnsupportedVersion)
+}
+
+func TestOpenWrongIdentity(t *testing.T) {
+	fx := sealedGolden(t)
+	_, other, _ := testKey(t)
+	got, err := Open(fx.blob, fx.macKey, other)
+	assertOpenErr(t, got, err, crypt.ErrWrongIdentity)
+}
+
+func TestOpenTruncatedBlob(t *testing.T) {
+	fx := sealedGolden(t)
+	if len(fx.blob) < 2 {
+		t.Fatalf("sealed blob length %d, want > 1", len(fx.blob))
+	}
+	truncated := fx.blob[:len(fx.blob)-1]
+	if _, err := crypt.DecryptBytes(truncated, fx.id); err == nil {
+		t.Fatal("DecryptBytes(truncated): err = nil, want step-1 failure")
+	}
+	got, err := Open(truncated, fx.macKey, fx.id)
+	if got != nil {
+		t.Fatal("Open returned a Manifest")
+	}
+	if err == nil {
+		t.Fatal("Open truncated blob: err = nil, want error")
+	}
+	for _, other := range []error{ErrUnsupportedVersion, ErrMalformed, ErrMACMismatch, ErrInconsistent} {
+		if errors.Is(err, other) {
+			t.Fatalf("Open truncated blob matched %v", other)
+		}
+	}
+}
+
+type sealFix struct {
+	blob   []byte
+	macKey []byte
+	id     age.Identity
+	r      age.Recipient
+}
+
+func testKey(t *testing.T) (macKey []byte, id age.Identity, r age.Recipient) {
+	t.Helper()
+	kid, err := key.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	macKey, err = kid.ManifestMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(macKey) != key.MACKeyLen {
+		t.Fatalf("mac key len = %d, want %d", len(macKey), key.MACKeyLen)
+	}
+	return macKey, kid.AgeIdentity(), kid.Recipient()
+}
+
+func sealedGolden(t *testing.T) sealFix {
+	t.Helper()
+	macKey, id, r := testKey(t)
+	blob, err := Seal(golden35(), macKey, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealFix{blob: blob, macKey: macKey, id: id, r: r}
+}
+
+func resealJSON(t *testing.T, fx sealFix, mut func(*Manifest)) []byte {
+	t.Helper()
+	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	mut(&m)
+	raw, err := json.Marshal(&m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := crypt.EncryptBytes(raw, fx.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertOpenErr(t *testing.T, got *Manifest, err, want error) {
+	t.Helper()
+	if got != nil {
+		t.Fatal("Open returned a Manifest")
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("Open: errors.Is(., %v) = false", want)
+	}
+	for _, other := range []error{ErrUnsupportedVersion, ErrMalformed, ErrMACMismatch, ErrInconsistent, crypt.ErrWrongIdentity} {
+		if other != want && errors.Is(err, other) {
+			t.Fatalf("Open: error also matched %v", other)
+		}
+	}
+}
+
+func assertManifestEqual(t *testing.T, got, want *Manifest) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("Open returned nil Manifest")
+	}
+	if got.Version != want.Version || got.K != want.K || got.N != want.N ||
+		got.CiphertextLen != want.CiphertextLen || got.StripeLen != want.StripeLen {
+		t.Errorf("manifest scalars: version=%d k=%d n=%d ciphertext_len=%d stripe_len=%d, want version=%d k=%d n=%d ciphertext_len=%d stripe_len=%d",
+			got.Version, got.K, got.N, got.CiphertextLen, got.StripeLen,
+			want.Version, want.K, want.N, want.CiphertextLen, want.StripeLen)
+	}
+	if len(got.Digests) != len(want.Digests) {
+		t.Fatalf("digest count = %d, want %d", len(got.Digests), len(want.Digests))
+	}
+	for i := range want.Digests {
+		if !hmac.Equal(got.Digests[i], want.Digests[i]) {
+			t.Errorf("digests[%d] mismatch: len got=%d want=%d, sha256 got=%x want=%x",
+				i, len(got.Digests[i]), len(want.Digests[i]), sha256.Sum256(got.Digests[i]), sha256.Sum256(want.Digests[i]))
+		}
+	}
+	if !hmac.Equal(got.MAC, want.MAC) {
+		t.Errorf("MAC mismatch: len got=%d want=%d, sha256 got=%x want=%x",
+			len(got.MAC), len(want.MAC), sha256.Sum256(got.MAC), sha256.Sum256(want.MAC))
+	}
 }

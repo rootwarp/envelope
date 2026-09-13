@@ -2,8 +2,16 @@
 package manifest
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+
+	"filippo.io/age"
+
+	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/key"
 )
 
 const Version uint32 = 1
@@ -34,7 +42,61 @@ func StripeLen(ciphertextLen int64, k int) int64 {
 var (
 	ErrUnsupportedVersion = errors.New("unsupported manifest version")
 	ErrMalformed          = errors.New("manifest failed shape validation")
+	ErrMACMismatch        = errors.New("manifest MAC mismatch")
+	ErrInconsistent       = errors.New("authentic manifest is internally inconsistent")
 )
+
+// Seal computes the MAC, marshals the body, and age-encrypts it to r.
+func Seal(m *Manifest, macKey []byte, r age.Recipient) ([]byte, error) {
+	in, err := m.macInput()
+	if err != nil {
+		return nil, err
+	}
+	m.MAC = hmacSHA256(macKey, in)
+	body, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return crypt.EncryptBytes(body, r)
+}
+
+// Open age-decrypts blob and verifies it in architecture §5.3 order.
+// It returns a *Manifest only when every check passed.
+func Open(blob, macKey []byte, id age.Identity) (*Manifest, error) {
+	body, err := crypt.DecryptBytes(blob, id)
+	if err != nil {
+		return nil, err
+	}
+	var m Manifest
+	// Unknown keys must be inert (FR-11); DisallowUnknownFields would reject them.
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	if m.Version != Version {
+		return nil, ErrUnsupportedVersion
+	}
+	if err := m.validateShape(); err != nil {
+		return nil, err
+	}
+	in, err := m.macInput()
+	if err != nil {
+		return nil, err
+	}
+	if !hmac.Equal(hmacSHA256(macKey, in), m.MAC) {
+		return nil, ErrMACMismatch
+	}
+	if m.StripeLen != StripeLen(m.CiphertextLen, m.K) {
+		return nil, ErrInconsistent
+	}
+	return &m, nil
+}
+
+func hmacSHA256(macKey, in []byte) []byte {
+	mac := hmac.New(sha256.New, macKey)
+	mac.Write(in)
+	// HMAC-SHA256 tag width equals the HKDF-derived MAC key.
+	return mac.Sum(make([]byte, 0, key.MACKeyLen))
+}
 
 func (m *Manifest) validateShape() error {
 	if m.K < 1 || m.N <= m.K || m.N > 256 {
