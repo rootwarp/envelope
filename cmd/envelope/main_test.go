@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -288,6 +290,115 @@ func TestMarkerNeverReachesOutput(t *testing.T) {
 	}
 	if !bytes.Contains(restored, marker) {
 		t.Fatal("marker missing from restore")
+	}
+}
+
+func TestStatusLinesOnStderr(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	shards := filepath.Join(dir, "shards")
+	out := filepath.Join(dir, "out.bin")
+	const size = 32
+	writeOpaque(t, in, size)
+
+	var kgOut, kgErr bytes.Buffer
+	if code := run([]string{"keygen", "-out", id}, &kgOut, &kgErr); code != exitOK {
+		t.Fatalf("keygen: exit = %d", code)
+	}
+	if kgOut.Len() != 0 {
+		t.Fatalf("keygen stdout has %d bytes, want 0", kgOut.Len())
+	}
+	if kgErr.Len() != 0 {
+		t.Fatalf("keygen stderr has %d bytes, want 0", kgErr.Len())
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"split", "-identity", id, "-in", in, "-out", shards}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("split: exit = %d", code)
+	}
+	if code := run([]string{"restore", "-identity", id, "-in", shards, "-out", out}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("restore: exit = %d", code)
+	}
+
+	wrote := fmt.Sprintf("wrote 5 shards to %s", shards)
+	restored := fmt.Sprintf("restored %d bytes to %s", size, out)
+	got := strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+	if len(got) != 3 {
+		t.Fatalf("stderr has %d lines, want 3", len(got))
+	}
+	nStr, ok := strings.CutPrefix(got[0], "encrypted ")
+	if !ok {
+		t.Fatalf("stderr line 1 = %q, want encrypted N bytes", got[0])
+	}
+	nStr, ok = strings.CutSuffix(nStr, " bytes")
+	if !ok {
+		t.Fatalf("stderr line 1 = %q, want encrypted N bytes", got[0])
+	}
+	if _, err := strconv.ParseUint(nStr, 10, 64); err != nil {
+		t.Fatalf("stderr line 1 = %q, want encrypted N bytes", got[0])
+	}
+	if got[1] != wrote {
+		t.Fatalf("stderr line 2 = %q, want %q", got[1], wrote)
+	}
+	if got[2] != restored {
+		t.Fatalf("stderr line 3 = %q, want %q", got[2], restored)
+	}
+	outStr := stdout.String()
+	for _, line := range got {
+		if strings.Contains(outStr, line) {
+			t.Errorf("status line present on stdout")
+		}
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout has %d bytes, want 0", stdout.Len())
+	}
+}
+
+func TestStatusLinesPayloadFree(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	shards := filepath.Join(dir, "shards")
+	out := filepath.Join(dir, "out.bin")
+
+	marker := syntheticMarker(t)
+	inBytes := make([]byte, 4096)
+	if _, err := rand.Read(inBytes); err != nil {
+		t.Fatal(err)
+	}
+	copy(inBytes[1024:], marker)
+	if err := os.WriteFile(in, inBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var outBuf, errBuf bytes.Buffer
+	for _, args := range [][]string{
+		{"keygen", "-out", id},
+		{"split", "-identity", id, "-in", in, "-out", shards},
+		{"restore", "-identity", id, "-in", shards, "-out", out},
+	} {
+		if code := run(args, &outBuf, &errBuf); code != exitOK {
+			t.Fatalf("run %v: exit = %d", args, code)
+		}
+	}
+
+	if bytes.Contains(outBuf.Bytes(), marker) {
+		t.Error("marker present in stdout")
+	}
+	if bytes.Contains(errBuf.Bytes(), marker) {
+		t.Error("marker present in stderr")
+	}
+
+	stderr := errBuf.String()
+	if !strings.Contains(stderr, "encrypted ") || !strings.Contains(stderr, " bytes\n") {
+		t.Error("stderr missing encrypted status line")
+	}
+	if !strings.Contains(stderr, fmt.Sprintf("wrote 5 shards to %s", shards)) {
+		t.Error("stderr missing wrote status line")
+	}
+	if !strings.Contains(stderr, fmt.Sprintf("restored %d bytes to %s", len(inBytes), out)) {
+		t.Error("stderr missing restored status line")
 	}
 }
 
