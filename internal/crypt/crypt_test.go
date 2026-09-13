@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -92,6 +93,130 @@ func TestCountReadAfterClose(t *testing.T) {
 	if n != dst.n {
 		t.Fatalf("Encrypt n = %d, dst count = %d", n, dst.n)
 	}
+}
+
+func TestDecryptRoundTrip(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		size int
+	}{
+		{"0 B", 0},
+		{"1 B", 1},
+		{"65535 B", 65535},
+		{"65536 B", 65536},
+		{"65537 B", 65537},
+		{"1 MiB", 1 << 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plain := make([]byte, tt.size)
+			if _, err := rand.Read(plain); err != nil {
+				t.Fatal(err)
+			}
+
+			var ct bytes.Buffer
+			if _, err := Encrypt(&ct, bytes.NewReader(plain), id.Recipient()); err != nil {
+				t.Fatal(err)
+			}
+
+			var got bytes.Buffer
+			n, err := Decrypt(&got, bytes.NewReader(ct.Bytes()), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != int64(tt.size) {
+				t.Fatalf("Decrypt n = %d, want %d", n, tt.size)
+			}
+			assertSameBytes(t, got.Bytes(), plain)
+		})
+	}
+}
+
+func TestDecryptWrongIdentity(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plain := make([]byte, 32)
+	if _, err := rand.Read(plain); err != nil {
+		t.Fatal(err)
+	}
+	var ct bytes.Buffer
+	if _, err := Encrypt(&ct, bytes.NewReader(plain), id.Recipient()); err != nil {
+		t.Fatal(err)
+	}
+
+	var dst bytes.Buffer
+	_, err = Decrypt(&dst, bytes.NewReader(ct.Bytes()), other)
+	if !errors.Is(err, ErrWrongIdentity) {
+		t.Fatalf("Decrypt wrong identity: errors.Is(., ErrWrongIdentity) = false")
+	}
+	if dst.Len() != 0 {
+		t.Fatalf("Decrypt wrong identity: dst received %d bytes, want 0", dst.Len())
+	}
+}
+
+func TestDecryptBytesAuthenticatesBeforeReturn(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two STREAM chunks: truncating the last tag fails after the first chunk
+	// has already authenticated. A `return io.ReadAll(r)` would leak that prefix.
+	plain := make([]byte, 65536+1)
+	if _, err := rand.Read(plain); err != nil {
+		t.Fatal(err)
+	}
+	var ct bytes.Buffer
+	if _, err := Encrypt(&ct, bytes.NewReader(plain), id.Recipient()); err != nil {
+		t.Fatal(err)
+	}
+	raw := ct.Bytes()
+	if len(raw) < 17 {
+		t.Fatalf("ciphertext length %d, want > 16", len(raw))
+	}
+	truncated := raw[:len(raw)-1]
+
+	got, err := DecryptBytes(truncated, id)
+	if err == nil {
+		t.Fatal("DecryptBytes(truncated): err = nil, want authentication error")
+	}
+	if got != nil {
+		t.Fatalf("DecryptBytes(truncated) returned %d-byte slice, want nil", len(got))
+	}
+}
+
+func TestEncryptBytesDecryptBytesRoundTrip(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plain := make([]byte, 64)
+	if _, err := rand.Read(plain); err != nil {
+		t.Fatal(err)
+	}
+	ct, err := EncryptBytes(plain, id.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecryptBytes(ct, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, plain)
 }
 
 type writeRecorder struct {
