@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 
+	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/erasure"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
@@ -115,6 +117,31 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		testAtReconstruct(shards)
 	}
 
+	enc, err := erasure.New(m.K, m.N)
+	if err != nil {
+		return nil, err
+	}
+	if err := enc.Reconstruct(shards); err != nil {
+		return nil, err
+	}
+
+	var ct bytes.Buffer
+	if err := enc.Join(&ct, shards, m.CiphertextLen); err != nil {
+		return nil, err
+	}
+	if testAtJoin != nil {
+		testAtJoin(ct.Bytes(), m.CiphertextLen)
+	}
+
+	n, err := decryptToFile(ctx, opts.OutPath, ct.Bytes(), id)
+	if err != nil {
+		return nil, err
+	}
+
+	if status != nil {
+		fmt.Fprintf(status, "restored %d bytes to %s\n", n, opts.OutPath)
+	}
+
 	return &RestoreReport{
 		OutPath:      opts.OutPath,
 		K:            m.K,
@@ -122,9 +149,126 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		Usable:       have,
 		FailedIndex:  failed,
 		MissingIndex: missing,
+		PlaintextLen: n,
 	}, nil
+}
+
+// The named results exist for err alone — the deferred cleanup assigns to it.
+// Every error path returns n=0; a partial count is not a fact the caller may report.
+func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Identity) (n int64, err error) {
+	partial := outPath + ".partial"
+
+	// O_EXCL: never silently truncate a leftover .partial — that file holds plaintext.
+	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", partial, err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		// Reaching here means err != nil: the only return n, nil sets committed first.
+		f.Close() // best effort; the real error is already in err
+		remove := os.Remove
+		if testRemove != nil {
+			remove = testRemove
+		}
+		if rerr := remove(partial); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			// Do NOT overwrite err: the operator needs the original diagnosis
+			// AND must be told a plaintext file could not be removed.
+			err = errors.Join(err, fmt.Errorf("could not remove %s: %w", partial, rerr))
+		}
+	}()
+
+	// 0600 survives every realistic umask and O_EXCL removes the existing-file
+	// case, so this is belt — but FR-18 names it.
+	if err = f.Chmod(0o600); err != nil {
+		return 0, err
+	}
+
+	dst := io.Writer(f)
+	if testWrapDst != nil {
+		dst = testWrapDst(f)
+	}
+	n, err = crypt.Decrypt(dst, ctxReader(ctx, bytes.NewReader(ct)), id.AgeIdentity())
+	if err != nil {
+		return 0, fmt.Errorf("payload: %w", err) // age authenticates HERE
+	}
+	if err = f.Sync(); err != nil { // data to stable storage
+		return 0, fmt.Errorf("sync %s: %w", partial, err)
+	}
+	if err = f.Close(); err != nil { // Close can report deferred write errors
+		return 0, fmt.Errorf("close %s: %w", partial, err)
+	}
+
+	rename := os.Rename
+	if testRename != nil {
+		rename = testRename
+	}
+	if err = rename(partial, outPath); err != nil {
+		return 0, fmt.Errorf("rename onto %s: %w", outPath, err)
+	}
+	committed = true // AFTER the rename, never before
+	syncDir(filepath.Dir(outPath))
+	return n, nil
+}
+
+// syncDir fsyncs a directory so a rename into it survives a crash. EINVAL and
+// ENOTSUP are tolerated; the file is already renamed and correct.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer d.Close()
+	sync := d.Sync
+	if testDirSync != nil {
+		sync = testDirSync
+	}
+	if err := sync(); err != nil &&
+		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		// never fail the restore
+	}
+}
+
+// ctxReader makes a copy observe cancellation, so a SIGINT turns into an
+// ordinary read error and FR-18's existing deferred cleanup removes .partial.
+func ctxReader(ctx context.Context, r io.Reader) io.Reader {
+	return &contextReader{ctx: ctx, r: r}
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *contextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // testAtReconstruct runs at the Reconstruct call site (after the survivor
 // count, before reconstruction). Tests assert len(shards)==n and index placement.
 var testAtReconstruct func(shards [][]byte)
+
+// testAtJoin observes the joined ciphertext. Tests assert length and SHA-256.
+var testAtJoin func(ct []byte, outSize int64)
+
+// testWrapDst wraps the decrypt destination. Tests inject a mid-copy error or
+// cancel the context after the first plaintext write.
+var testWrapDst func(io.Writer) io.Writer
+
+// testRename replaces os.Rename. Tests inject a rename failure without setting
+// committed.
+var testRename func(oldpath, newpath string) error
+
+// testRemove replaces os.Remove of .partial during uncommitted cleanup. Tests
+// join the leftover-file error with the original diagnosis.
+var testRemove func(name string) error
+
+// testDirSync replaces the directory Sync. Tests inject ENOTSUP; Restore must
+// still succeed.
+var testDirSync func() error

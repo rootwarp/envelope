@@ -79,6 +79,9 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err != nil {
 		return nil, err
 	}
+	if testAtCiphertext != nil {
+		testAtCiphertext(buf.Bytes())
+	}
 
 	// reedsolomon's ErrShortData names neither the parameter nor the file. Envelope's own
 	// message names both numbers. erasure.Split carries ErrCiphertextTooShort as the
@@ -146,6 +149,10 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 // testFailManifestWrite, when set, runs after shards are on disk and before
 // manifest.age is created. Tests inject a crash between S10 and S12.
 var testFailManifestWrite func() error
+
+// testAtCiphertext observes the ciphertext after Encrypt. Tests record its
+// SHA-256 to assert Join used the manifest length.
+var testAtCiphertext func([]byte)
 
 func shardFileName(i int) string {
 	return fmt.Sprintf("shard-%02d", i)

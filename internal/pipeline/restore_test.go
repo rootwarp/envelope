@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rootwarp/envelope/internal/erasure"
@@ -274,6 +276,251 @@ func TestStaleManifestZeroMatch(t *testing.T) {
 		t.Fatalf("errors.Is(., ErrStaleManifest) = false")
 	}
 	assertNoOutOrPartial(t, outPath)
+}
+
+func TestRestoreRoundTripLarge(t *testing.T) {
+	assertRestoreRoundTrip(t, 1<<20)
+}
+
+func TestRestoreRoundTripEmpty(t *testing.T) {
+	assertRestoreRoundTrip(t, 0)
+}
+
+func TestRestoreDestinationMode(t *testing.T) {
+	restore, _ := splitFixture(t)
+	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Fatalf("perm = %04o, want 0600", got)
+	}
+	assertPathAbsent(t, restore.OutPath+".partial")
+}
+
+func TestMidCopyErrorLeavesNothing(t *testing.T) {
+	restore, _ := splitFixture(t)
+	testWrapDst = func(w io.Writer) io.Writer {
+		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
+	}
+	t.Cleanup(func() { testWrapDst = nil })
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if !errors.Is(err, errInjectedCopy) {
+		t.Fatalf("errors.Is(., injected copy) = false")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
+	restore, _ := splitFixture(t)
+	want := make([]byte, 32)
+	if _, err := rand.Read(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(restore.OutPath, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	testWrapDst = func(w io.Writer) io.Writer {
+		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
+	}
+	t.Cleanup(func() { testWrapDst = nil })
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want error")
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+	assertPathAbsent(t, restore.OutPath+".partial")
+}
+
+func TestCleanupFailureJoinsErrors(t *testing.T) {
+	restore, _ := splitFixture(t)
+	partial := restore.OutPath + ".partial"
+	testWrapDst = func(w io.Writer) io.Writer {
+		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
+	}
+	testRemove = func(string) error { return errInjectedRemove }
+	t.Cleanup(func() {
+		testWrapDst = nil
+		testRemove = nil
+	})
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if !errors.Is(err, errInjectedCopy) {
+		t.Fatal("errors.Is(., original) = false")
+	}
+	if !errors.Is(err, errInjectedRemove) {
+		t.Fatal("errors.Is(., leftover-file error) = false")
+	}
+	if !strings.Contains(err.Error(), partial) {
+		t.Fatal("error does not name the leftover file")
+	}
+}
+
+func TestContextCancelMidCopy(t *testing.T) {
+	restore, _, _ := splitSized(t, 1<<20)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	testWrapDst = func(w io.Writer) io.Writer {
+		return &cancelOnWrite{w: w, cancel: cancel}
+	}
+	t.Cleanup(func() { testWrapDst = nil })
+
+	_, err := Restore(ctx, restore, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want context cancel")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestCommittedSetAfterRename(t *testing.T) {
+	restore, _ := splitFixture(t)
+	testRename = func(string, string) error { return errInjectedRename }
+	t.Cleanup(func() { testRename = nil })
+
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if !errors.Is(err, errInjectedRename) {
+		t.Fatal("errors.Is(., injected rename) = false")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestSyncDirTolerantOfENOTSUP(t *testing.T) {
+	testDirSync = func() error { return syscall.ENOTSUP }
+	t.Cleanup(func() { testDirSync = nil })
+
+	restore, _ := splitFixture(t)
+	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(restore.OutPath); err != nil {
+		t.Fatal("out missing after ENOTSUP from syncDir")
+	}
+	assertPathAbsent(t, restore.OutPath+".partial")
+
+	// No error return: a missing directory cannot fail the restore.
+	syncDir(filepath.Join(t.TempDir(), "missing"))
+}
+
+func TestJoinUsesManifestLength(t *testing.T) {
+	var splitCT []byte
+	testAtCiphertext = func(ct []byte) {
+		splitCT = bytes.Clone(ct)
+	}
+	t.Cleanup(func() { testAtCiphertext = nil })
+
+	restore, split := splitFixture(t)
+	m := openSplitManifest(t, split)
+
+	called := false
+	testAtJoin = func(ct []byte, outSize int64) {
+		called = true
+		if outSize != m.CiphertextLen {
+			t.Errorf("Join outSize = %d, CiphertextLen = %d", outSize, m.CiphertextLen)
+		}
+		if int64(len(ct)) != m.CiphertextLen {
+			t.Errorf("joined len = %d, CiphertextLen = %d", len(ct), m.CiphertextLen)
+		}
+		assertSameBytes(t, ct, splitCT)
+	}
+	t.Cleanup(func() { testAtJoin = nil })
+
+	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("Join site was not reached")
+	}
+}
+
+func assertRestoreRoundTrip(t *testing.T, size int) {
+	t.Helper()
+	restore, _, want := splitSized(t, size)
+	rep, err := Restore(context.Background(), restore, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+	if rep.PlaintextLen != int64(size) {
+		t.Fatalf("PlaintextLen = %d, want %d", rep.PlaintextLen, size)
+	}
+	assertPathAbsent(t, restore.OutPath+".partial")
+}
+
+func splitSized(t *testing.T, size int) (RestoreOptions, SplitOptions, []byte) {
+	t.Helper()
+	outDir := t.TempDir()
+	split := validOpts(t, outDir)
+	writeRandomFile(t, split.InPath, size)
+	want, err := os.ReadFile(split.InPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Split(context.Background(), split, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return RestoreOptions{
+		IdentityPath: split.IdentityPath,
+		InDir:        outDir,
+		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+	}, split, want
+}
+
+var (
+	errInjectedCopy   = errors.New("injected mid-copy error")
+	errInjectedRename = errors.New("injected rename failure")
+	errInjectedRemove = errors.New("injected remove failure")
+)
+
+type failAfterN struct {
+	w    io.Writer
+	left int
+	err  error
+}
+
+func (f *failAfterN) Write(p []byte) (int, error) {
+	if f.left <= 0 {
+		return 0, f.err
+	}
+	if len(p) > f.left {
+		p = p[:f.left]
+	}
+	n, err := f.w.Write(p)
+	f.left -= n
+	if err != nil {
+		return n, err
+	}
+	if f.left <= 0 {
+		return n, f.err
+	}
+	return n, nil
+}
+
+type cancelOnWrite struct {
+	w      io.Writer
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnWrite) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.cancel()
+	return n, err
 }
 
 func splitFixture(t *testing.T) (RestoreOptions, SplitOptions) {
