@@ -68,7 +68,11 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 
 	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
 	if err != nil {
-		return nil, err
+		path := manPath
+		if errors.Is(err, crypt.ErrWrongIdentity) {
+			path = opts.IdentityPath
+		}
+		return nil, fmt.Errorf("%w: %s", err, path)
 	}
 
 	// Positional: compacting survivors makes ReconstructData and Join both
@@ -101,6 +105,13 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		failed = append(failed, i)
 	}
 
+	// FR-26: indices only, never shard bytes.
+	if status != nil {
+		for _, i := range failed {
+			fmt.Fprintf(status, "failed digest at index %d\n", i)
+		}
+	}
+
 	have := erasure.Usable(shards)
 	if have < m.K {
 		tf := &erasure.TooFewShardsError{Need: m.K, Have: have}
@@ -108,7 +119,8 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 			// MAC binds the owner, not a point in time; every current shard
 			// screens as corrupt. Wrap so M7.2 can name the diagnosis without
 			// a type change. Plan R6.
-			return nil, fmt.Errorf("%w: %w", tf, ErrStaleManifest)
+			return nil, fmt.Errorf("%d of %d shards matched the manifest — the manifest may not belong to this shard set.: %w: %w",
+				have, m.N, tf, ErrStaleManifest)
 		}
 		return nil, tf
 	}

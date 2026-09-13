@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/key"
+	"github.com/rootwarp/envelope/internal/manifest"
 )
 
 func TestRunIsCallableWithBuffers(t *testing.T) {
@@ -399,6 +404,244 @@ func TestStatusLinesPayloadFree(t *testing.T) {
 	}
 	if !strings.Contains(stderr, fmt.Sprintf("restored %d bytes to %s", len(inBytes), out)) {
 		t.Error("stderr missing restored status line")
+	}
+}
+
+func TestCorruptShardIndexInStderr(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	shards := filepath.Join(dir, "shards")
+	out := filepath.Join(dir, "out.bin")
+	mustRun(t, "keygen", "-out", id)
+	writeOpaque(t, in, 4096)
+	mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+
+	const idx = 2
+	xorFileByte(t, filepath.Join(shards, fmt.Sprintf("shard-%02d", idx)), 0)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"restore", "-identity", id, "-in", shards, "-out", out}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitOK, stderr.String())
+	}
+	want := fmt.Sprintf("failed digest at index %d", idx)
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr %q missing %q", stderr.String(), want)
+	}
+}
+
+func TestTooFewShardsCountsInStderr(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	shards := filepath.Join(dir, "shards")
+	out := filepath.Join(dir, "out.bin")
+	mustRun(t, "keygen", "-out", id)
+	writeOpaque(t, in, 4096)
+	mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+	for _, name := range []string{"shard-00", "shard-01", "shard-02"} {
+		if err := os.Remove(filepath.Join(shards, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"restore", "-identity", id, "-in", shards, "-out", out}, &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitFailure, stderr.String())
+	}
+	const want = "need at least 3 usable shards, have 2"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr %q missing %q", stderr.String(), want)
+	}
+}
+
+func TestStaleManifestMessage(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	dirA := filepath.Join(dir, "a")
+	dirB := filepath.Join(dir, "b")
+	out := filepath.Join(dir, "out.bin")
+	mustRun(t, "keygen", "-out", id)
+	writeOpaque(t, in, 4096)
+	mustRun(t, "split", "-identity", id, "-in", in, "-out", dirA)
+	stale, err := os.ReadFile(filepath.Join(dirA, "manifest.age"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, "split", "-identity", id, "-in", in, "-out", dirB)
+	if err := os.WriteFile(filepath.Join(dirB, "manifest.age"), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"restore", "-identity", id, "-in", dirB, "-out", out}, &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitFailure, stderr.String())
+	}
+	got := stderr.String()
+	const want = "0 of 5 shards matched the manifest — the manifest may not belong to this shard set."
+	if !strings.Contains(got, want) {
+		t.Fatalf("stderr %q missing %q", got, want)
+	}
+	if !strings.Contains(got, "0 of 5") {
+		t.Fatalf("stderr %q missing 0 of 5", got)
+	}
+	if strings.Contains(strings.ToLower(got), "all shards corrupt") {
+		t.Fatalf("stderr %q is the naive all-shards-corrupt message", got)
+	}
+}
+
+func TestDistinguishableFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		prep   func(t *testing.T, dir string) (args []string, path string)
+		needle string
+	}{
+		{
+			name:   "wrong identity",
+			needle: "no identity matched the file",
+			prep: func(t *testing.T, dir string) ([]string, string) {
+				id := filepath.Join(dir, "identity.txt")
+				other := filepath.Join(dir, "other.txt")
+				in := filepath.Join(dir, "in.bin")
+				shards := filepath.Join(dir, "shards")
+				out := filepath.Join(dir, "out.bin")
+				mustRun(t, "keygen", "-out", id)
+				mustRun(t, "keygen", "-out", other)
+				writeOpaque(t, in, 32)
+				mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+				return []string{"restore", "-identity", other, "-in", shards, "-out", out}, other
+			},
+		},
+		{
+			name:   "MAC tamper",
+			needle: "manifest MAC mismatch",
+			prep: func(t *testing.T, dir string) ([]string, string) {
+				id := filepath.Join(dir, "identity.txt")
+				in := filepath.Join(dir, "in.bin")
+				shards := filepath.Join(dir, "shards")
+				out := filepath.Join(dir, "out.bin")
+				mustRun(t, "keygen", "-out", id)
+				writeOpaque(t, in, 32)
+				mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+				manPath := filepath.Join(shards, "manifest.age")
+				tamperManifestMAC(t, id, manPath)
+				return []string{"restore", "-identity", id, "-in", shards, "-out", out}, manPath
+			},
+		},
+		{
+			name:   "no manifest",
+			needle: "no manifest.age in the shard directory",
+			prep: func(t *testing.T, dir string) ([]string, string) {
+				id := filepath.Join(dir, "identity.txt")
+				in := filepath.Join(dir, "in.bin")
+				shards := filepath.Join(dir, "shards")
+				out := filepath.Join(dir, "out.bin")
+				mustRun(t, "keygen", "-out", id)
+				writeOpaque(t, in, 32)
+				mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+				manPath := filepath.Join(shards, "manifest.age")
+				if err := os.Remove(manPath); err != nil {
+					t.Fatal(err)
+				}
+				return []string{"restore", "-identity", id, "-in", shards, "-out", out}, manPath
+			},
+		},
+	}
+
+	needles := make([]string, len(tests))
+	for i, tt := range tests {
+		needles[i] = tt.needle
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			args, path := tt.prep(t, dir)
+			inBytes, err := os.ReadFile(filepath.Join(dir, "in.bin"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := run(args, &stdout, &stderr)
+			if code != exitFailure {
+				t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitFailure, stderr.String())
+			}
+			got := stderr.String()
+			if !strings.Contains(got, tt.needle) {
+				t.Fatalf("stderr %q missing %q", got, tt.needle)
+			}
+			if !strings.Contains(got, path) {
+				t.Fatalf("stderr %q missing path %q", got, path)
+			}
+			for _, other := range needles {
+				if other == tt.needle {
+					continue
+				}
+				if strings.Contains(got, other) {
+					t.Fatalf("stderr %q also contains %q", got, other)
+				}
+			}
+			if bytes.Contains(stderr.Bytes(), inBytes) {
+				t.Error("payload present in stderr")
+			}
+		})
+	}
+}
+
+func xorFileByte(t *testing.T, path string, offset int) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset < 0 || offset >= len(b) {
+		t.Fatalf("offset %d out of range (len %d)", offset, len(b))
+	}
+	b[offset] ^= 0x01
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tamperManifestMAC(t *testing.T, identityPath, manPath string) {
+	t.Helper()
+	id, err := key.Load(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(id.Zero)
+	macKey, err := id.ManifestMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { clear(macKey) })
+	blob, err := os.ReadFile(manPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.MAC) == 0 {
+		t.Fatal("manifest MAC is empty")
+	}
+	m.MAC[0] ^= 0x01
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := crypt.EncryptBytes(body, id.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manPath, out, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
