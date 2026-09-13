@@ -5,6 +5,8 @@ Reed–Solomon-codes the ciphertext into `n` shards so any `k` of them restore t
 original. Encrypt-then-code: no shard, and no losing subset of shards, contains
 plaintext.
 
+See [docs/usage.md](docs/usage.md) for the full usage guide.
+
 v0 is local files only: `keygen`, `split`, `restore`. Build with
 `go build -o envelope ./cmd/envelope`.
 
