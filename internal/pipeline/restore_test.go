@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/rootwarp/envelope/internal/erasure"
 	"github.com/rootwarp/envelope/internal/key"
 )
@@ -554,6 +556,63 @@ func TestRestoreTamperedMACEndToEnd(t *testing.T) {
 		t.Fatal("reconstruction ran")
 	}
 	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestForgottenCloseFailsRestore(t *testing.T) {
+	// With Close skipped the counted ciphertext length is ALSO short, so the manifest is
+	// self-consistent and every digest matches. age.Decrypt reaches the payload, emits
+	// 196,608 bytes, and THEN returns "unexpected EOF" from the copy. The restore fails
+	// ONLY because that copy error is propagated. An implementation that swallowed it
+	// would write 196,608 bytes of genuine plaintext to .partial and rename it — a silent
+	// partial-secret restore.
+
+	outDir := t.TempDir()
+	split := validOpts(t, outDir)
+	id, err := key.Load(split.IdentityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 200000 bytes flush three 64KiB STREAM chunks; Close would have written the 3392-byte tail.
+	payload := make([]byte, 200000)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build ciphertext the wrong way on purpose: write N bytes through age.Encrypt and
+	// never Close. The tail — including the final chunk's Poly1305 tag — is missing.
+	var ct bytes.Buffer
+	w, err := age.Encrypt(&ct, id.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(w, bytes.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	// NO w.Close() — this is the bug being guarded against.
+
+	testInjectCiphertext = func() []byte { return ct.Bytes() }
+	t.Cleanup(func() { testInjectCiphertext = nil })
+
+	if _, err := Split(context.Background(), split, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "out.bin")
+	_, restoreErr := Restore(context.Background(), RestoreOptions{
+		IdentityPath: split.IdentityPath,
+		InDir:        outDir,
+		OutPath:      outPath,
+	}, io.Discard)
+
+	t.Run("restore returns an error", func(t *testing.T) {
+		if restoreErr == nil {
+			t.Fatal("err = nil, want error")
+		}
+	})
+	t.Run("neither -out nor .partial exists", func(t *testing.T) {
+		assertNoOutOrPartial(t, outPath)
+	})
 }
 
 func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {

@@ -75,9 +75,15 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	defer in.Close()
 
 	var buf bytes.Buffer
-	ciphertextLen, err := crypt.Encrypt(&buf, in, id.Recipient())
-	if err != nil {
-		return nil, err
+	var ciphertextLen int64
+	if testInjectCiphertext != nil {
+		buf.Write(testInjectCiphertext())
+		ciphertextLen = int64(buf.Len())
+	} else {
+		ciphertextLen, err = crypt.Encrypt(&buf, in, id.Recipient())
+		if err != nil {
+			return nil, err
+		}
 	}
 	if testAtCiphertext != nil {
 		testAtCiphertext(buf.Bytes())
@@ -153,6 +159,10 @@ var testFailManifestWrite func() error
 // testAtCiphertext observes the ciphertext after Encrypt. Tests record its
 // SHA-256 to assert Join used the manifest length.
 var testAtCiphertext func([]byte)
+
+// testInjectCiphertext, when set, replaces crypt.Encrypt. Tests inject a
+// closeless age stream so Split records the short counted length.
+var testInjectCiphertext func() []byte
 
 func shardFileName(i int) string {
 	return fmt.Sprintf("shard-%02d", i)
