@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/rootwarp/envelope/internal/pipeline"
 )
@@ -34,7 +36,11 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 // run is the entire command. It writes only to the injected writers. FR-35.
 func run(args []string, stdout, stderr io.Writer) int {
-	return exitCode(runErr(args, stdout, stderr), stderr)
+	// FR-34. signal.NotifyContext restores the default handler on stop(), so a
+	// second Ctrl-C during cleanup still kills the process.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return exitCode(runErr(ctx, args, stdout, stderr), stderr)
 }
 
 // exitCode is the only exit-code mapping (§9.2).
@@ -50,7 +56,7 @@ func exitCode(err error, stderr io.Writer) int {
 	}
 }
 
-func runErr(args []string, stdout, stderr io.Writer) error {
+func runErr(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// -version is a flag, not a subcommand; branch before dispatch (FR-30, §3.1).
 	if len(args) > 0 && (args[0] == "-version" || args[0] == "--version") {
 		return printVersion(stdout)
@@ -63,9 +69,9 @@ func runErr(args []string, stdout, stderr io.Writer) error {
 	case "keygen":
 		return runKeygen(args[1:], stderr)
 	case "split":
-		return runSplit(args[1:], stderr)
+		return runSplit(ctx, args[1:], stderr)
 	case "restore":
-		return runRestore(args[1:], stderr)
+		return runRestore(ctx, args[1:], stderr)
 	default:
 		fmt.Fprint(stderr, usageAll)
 		return errUsage
@@ -104,7 +110,7 @@ func runKeygen(args []string, stderr io.Writer) error {
 	return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: out}, stderr)
 }
 
-func runSplit(args []string, stderr io.Writer) error {
+func runSplit(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := commandFlags("split", usageSplit, stderr)
 	var identity, in, out string
 	var k, n int
@@ -123,7 +129,7 @@ func runSplit(args []string, stderr io.Writer) error {
 		fmt.Fprintln(stderr, err)
 		return errUsage
 	}
-	_, err := pipeline.Split(context.Background(), pipeline.SplitOptions{
+	_, err := pipeline.Split(ctx, pipeline.SplitOptions{
 		IdentityPath: identity,
 		InPath:       in,
 		OutDir:       out,
@@ -133,7 +139,7 @@ func runSplit(args []string, stderr io.Writer) error {
 	return err
 }
 
-func runRestore(args []string, stderr io.Writer) error {
+func runRestore(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := commandFlags("restore", usageRestore, stderr)
 	var identity, in, out string
 	fs.StringVar(&identity, "identity", "", "identity file")
@@ -145,7 +151,7 @@ func runRestore(args []string, stderr io.Writer) error {
 	if err := require(fs, identity, in, out); err != nil {
 		return err
 	}
-	_, err := pipeline.Restore(context.Background(), pipeline.RestoreOptions{
+	_, err := pipeline.Restore(ctx, pipeline.RestoreOptions{
 		IdentityPath: identity,
 		InDir:        in,
 		OutPath:      out,
