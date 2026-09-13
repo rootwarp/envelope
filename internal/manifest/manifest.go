@@ -68,7 +68,7 @@ func Open(blob, macKey []byte, id age.Identity) (*Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	// Unknown keys must be inert (FR-11); DisallowUnknownFields would reject them.
+	// Unknown keys must be inert (FR-11): extra JSON keys are dropped, not rejected.
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}

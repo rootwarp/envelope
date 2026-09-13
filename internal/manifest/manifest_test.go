@@ -59,6 +59,12 @@ func TestMACInputGoldenVector(t *testing.T) {
 		t.Errorf("HMAC mismatch: len got=%d want=%d, sha256 got=%x want=%x",
 			len(tag), len(wantMAC), sha256.Sum256(tag), sha256.Sum256(wantMAC))
 	}
+
+	body, err := json.Marshal(golden35())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDigestsJSONStrings(t, body)
 }
 
 func TestMACInputLength(t *testing.T) {
@@ -351,6 +357,118 @@ func TestOpenTruncatedBlob(t *testing.T) {
 	}
 }
 
+func TestUnknownTopLevelKeyIsInert(t *testing.T) {
+	fx := sealedGolden(t)
+	want, err := Open(fx.blob, fx.macKey, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blob := resealRaw(t, fx, func(body []byte) []byte {
+		out := appendJSONMember(t, body, `"future_field":{"nested":true}`)
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(out, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := raw["future_field"]; !ok {
+			t.Fatal("future_field missing from re-encoded body")
+		}
+		return out
+	})
+
+	got, err := Open(blob, fx.macKey, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertManifestEqual(t, got, want)
+}
+
+func TestDuplicateKeyFailsMAC(t *testing.T) {
+	// encoding/json keeps the last duplicate, so k=9 mismatches the MAC.
+	// Do not reject duplicates as malformed JSON.
+	macKey, id, r := testKey(t)
+	m := shaped(3, 16)
+	m.CiphertextLen = 48
+	m.StripeLen = StripeLen(48, 3)
+	orig, err := Seal(m, macKey, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := sealFix{blob: orig, macKey: macKey, id: id, r: r}
+
+	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = appendJSONMember(t, body, `"k":9`)
+	var parsed Manifest
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.K != 9 {
+		t.Fatalf("k = %d, want 9 (last duplicate wins)", parsed.K)
+	}
+	blob, err := crypt.EncryptBytes(body, fx.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Open(blob, fx.macKey, fx.id)
+	assertOpenErr(t, got, err, ErrMACMismatch)
+}
+
+func TestDigestsSerializeAsBase64(t *testing.T) {
+	body, err := json.Marshal(golden35())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDigestsJSONStrings(t, body)
+}
+
+func TestFloatIntoIntegerFieldRejected(t *testing.T) {
+	// encoding/json rejects fractional and exponent forms into int; Envelope relies on that.
+	for _, body := range []string{`{"k": 3.5}`, `{"k": 1.0e6}`} {
+		t.Run(body, func(t *testing.T) {
+			var m Manifest
+			if err := json.Unmarshal([]byte(body), &m); err == nil {
+				t.Fatal("json.Unmarshal err = nil, want rejection")
+			}
+		})
+	}
+}
+
+func TestNegativeLengthsRejectedBeforeConversion(t *testing.T) {
+	// JSON unmarshals -1 into int64; validateShape must reject it
+	// before any uint64 conversion.
+	fx := sealedGolden(t)
+	blob := resealJSON(t, fx, func(m *Manifest) { m.CiphertextLen = -1 })
+
+	body, err := crypt.DecryptBytes(blob, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.CiphertextLen != -1 {
+		t.Fatalf("ciphertext_len = %d, want -1", m.CiphertextLen)
+	}
+	if err := m.validateShape(); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("validateShape: errors.Is(., ErrMalformed) = false")
+	}
+	in, err := m.macInput()
+	if in != nil {
+		t.Errorf("macInput slice len = %d, want nil", len(in))
+	}
+	if !errors.Is(err, ErrMalformed) {
+		t.Fatalf("macInput: errors.Is(., ErrMalformed) = false")
+	}
+
+	got, err := Open(blob, fx.macKey, fx.id)
+	assertOpenErr(t, got, err, ErrMalformed)
+}
+
 type sealFix struct {
 	blob   []byte
 	macKey []byte
@@ -404,6 +522,62 @@ func resealJSON(t *testing.T, fx sealFix, mut func(*Manifest)) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func resealRaw(t *testing.T, fx sealFix, mut func([]byte) []byte) []byte {
+	t.Helper()
+	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := mut(body)
+	out, err := crypt.EncryptBytes(raw, fx.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func appendJSONMember(t *testing.T, body []byte, member string) []byte {
+	t.Helper()
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		t.Fatal("JSON body is not an object")
+	}
+	out := make([]byte, 0, len(body)+1+len(member))
+	out = append(out, body[:len(body)-1]...)
+	out = append(out, ',')
+	out = append(out, member...)
+	out = append(out, '}')
+	return out
+}
+
+func assertDigestsJSONStrings(t *testing.T, body []byte) {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	d, ok := raw["digests"]
+	if !ok {
+		t.Fatal("missing digests key")
+	}
+	var elems []json.RawMessage
+	if err := json.Unmarshal(d, &elems); err != nil {
+		t.Fatal(err)
+	}
+	if len(elems) == 0 {
+		t.Fatal("digests array is empty")
+	}
+	first := elems[0]
+	if len(first) == 0 {
+		t.Fatal("digests[0] is empty")
+	}
+	if first[0] != '"' {
+		t.Errorf("digests[0] first byte = %q, want %q", first[0], '"')
+	}
+	if first[0] == '[' && len(first) > 1 && first[1] >= '0' && first[1] <= '9' {
+		t.Errorf("digests[0] is a JSON number array, want a base64 string")
+	}
 }
 
 func assertOpenErr(t *testing.T, got *Manifest, err, want error) {
