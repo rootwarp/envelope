@@ -154,6 +154,7 @@ command ever prints file contents or key material.
 | `k must be at least 1` / `n must be greater than k` / `n must not exceed 256` | Invalid `(k, n)` | Pick `1 ≤ k < n ≤ 256` |
 | `no manifest.age in the shard directory: …` | `manifest.age` wasn't copied into `-in` | Copy any surviving copy of the manifest in |
 | `a .partial file from a previous run is present: …` | An earlier restore was killed hard (e.g. power loss) | Delete the `.partial` — it may hold plaintext — then retry |
+| `output written but directory could not be synced: …` | The restored file was renamed into place, then directory fsync failed | Keep the output; treat crash durability of the directory entry as uncertain |
 | `need at least K usable shards, have H` | Fewer than `k` shards survived the digest check | Find more shards; check that names/indices are right |
 | `unusable shard at index N` | That path exists but is not a usable regular file | Remove the stray directory/FIFO or ignore it if `k` others are good |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |

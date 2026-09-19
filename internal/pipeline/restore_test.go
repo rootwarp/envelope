@@ -411,9 +411,23 @@ func TestSyncDirTolerantOfENOTSUP(t *testing.T) {
 		t.Fatal("out missing after ENOTSUP from syncDir")
 	}
 	assertPathAbsent(t, restore.OutPath+".partial")
+}
 
-	// No error return: a missing directory cannot fail the restore.
-	syncDir(filepath.Join(t.TempDir(), "missing"))
+func TestSyncDirEIOFailsAfterCommit(t *testing.T) {
+	testDirSync = func() error { return syscall.EIO }
+	t.Cleanup(func() { testDirSync = nil })
+
+	restore, _, want := splitSized(t, 4096)
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if !errors.Is(err, ErrDirSync) {
+		t.Fatalf("errors.Is(., ErrDirSync) = false, err=%v", err)
+	}
+	got, rerr := os.ReadFile(restore.OutPath)
+	if rerr != nil {
+		t.Fatal("out missing after directory-sync failure")
+	}
+	assertSameBytes(t, got, want)
+	assertPathAbsent(t, restore.OutPath+".partial")
 }
 
 func TestJoinUsesManifestLength(t *testing.T) {

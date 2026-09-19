@@ -251,16 +251,19 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Ident
 		return 0, fmt.Errorf("rename onto %s: %w", outPath, err)
 	}
 	committed = true // AFTER the rename, never before
-	syncDir(filepath.Dir(outPath))
+	if err = syncDir(filepath.Dir(outPath)); err != nil {
+		return n, fmt.Errorf("%w: %s: %w", ErrDirSync, outPath, err)
+	}
 	return n, nil
 }
 
 // syncDir fsyncs a directory so a rename into it survives a crash. EINVAL and
-// ENOTSUP are tolerated; the file is already renamed and correct.
-func syncDir(dir string) {
+// ENOTSUP are tolerated: the file is already renamed and those errors mean the
+// filesystem has no directory-sync operation.
+func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
-		return
+		return err
 	}
 	defer d.Close()
 	sync := d.Sync
@@ -269,8 +272,9 @@ func syncDir(dir string) {
 	}
 	if err := sync(); err != nil &&
 		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-		// never fail the restore
+		return err
 	}
+	return nil
 }
 
 // ctxReader makes a copy observe cancellation, so a SIGINT turns into an
@@ -311,6 +315,6 @@ var testRename func(oldpath, newpath string) error
 // join the leftover-file error with the original diagnosis.
 var testRemove func(name string) error
 
-// testDirSync replaces the directory Sync. Tests inject ENOTSUP; Restore must
-// still succeed.
+// testDirSync replaces the directory Sync. Tests inject ENOTSUP (restore must
+// still succeed) and EIO (restore must fail after commit).
 var testDirSync func() error
