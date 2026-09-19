@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 
 	"github.com/rootwarp/envelope/internal/pipeline"
@@ -24,13 +23,6 @@ const (
 )
 
 var errUsage = errors.New("invalid usage")
-
-const (
-	usageKeygen  = "envelope keygen  -out identity.txt"
-	usageSplit   = "envelope split   -identity identity.txt -in secret.bin -out shards/ [-k 3] [-n 5]"
-	usageRestore = "envelope restore -identity identity.txt -in shards/ -out secret.bin"
-	usageAll     = usageKeygen + "\n" + usageSplit + "\n" + usageRestore + "\n"
-)
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -62,7 +54,7 @@ func exitCode(err error, stderr io.Writer) int {
 
 func runErr(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// -version is a flag, not a subcommand; branch before dispatch (FR-30, §3.1).
-	if len(args) > 0 && (args[0] == "-version" || args[0] == "--version") {
+	if isVersionArg(args) {
 		return printVersion(stdout)
 	}
 	if len(args) == 0 {
@@ -80,25 +72,6 @@ func runErr(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		fmt.Fprint(stderr, usageAll)
 		return errUsage
 	}
-}
-
-func printVersion(w io.Writer) error {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return errors.New("build info unavailable")
-	}
-	fmt.Fprintf(w, "envelope %s\n", info.Main.Version)
-	for _, m := range info.Deps {
-		switch m.Path {
-		case "filippo.io/age", "github.com/klauspost/reedsolomon":
-			ver := m.Version
-			if m.Replace != nil {
-				ver = m.Replace.Version
-			}
-			fmt.Fprintf(w, "%s %s\n", m.Path, ver)
-		}
-	}
-	return nil
 }
 
 func runKeygen(args []string, stderr io.Writer) error {
