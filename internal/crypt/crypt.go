@@ -4,6 +4,7 @@ package crypt
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +39,7 @@ func Encrypt(dst io.Writer, src io.Reader, r age.Recipient) (n int64, err error)
 func Decrypt(dst io.Writer, src io.Reader, id age.Identity) (n int64, err error) {
 	r, aerr := age.Decrypt(src, id)
 	if aerr != nil {
-		return 0, wrapIdentityErr(aerr)
+		return 0, wrapDecryptErr(aerr)
 	}
 	return io.Copy(dst, r)
 }
@@ -59,7 +60,7 @@ func EncryptBytes(plaintext []byte, r age.Recipient) ([]byte, error) {
 func DecryptBytes(ciphertext []byte, id age.Identity) ([]byte, error) {
 	r, err := age.Decrypt(bytes.NewReader(ciphertext), id)
 	if err != nil {
-		return nil, wrapIdentityErr(err)
+		return nil, wrapDecryptErr(err)
 	}
 	plain, err := io.ReadAll(r)
 	if err != nil {
@@ -69,15 +70,21 @@ func DecryptBytes(ciphertext []byte, id age.Identity) ([]byte, error) {
 }
 
 // ErrWrongIdentity is returned when no supplied identity matches the file.
-// It wraps *age.NoIdentityMatchError so callers use errors.Is, never string-match.
 var ErrWrongIdentity = errors.New("no identity matched the file")
 
-func wrapIdentityErr(err error) error {
+// ErrMalformedAge is returned for age header/parse failures. age quotes the
+// input line; never wrap or return that error.
+var ErrMalformedAge = errors.New("malformed age file")
+
+func wrapDecryptErr(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	var noMatch *age.NoIdentityMatchError
 	if errors.As(err, &noMatch) {
-		return fmt.Errorf("%w: %w", ErrWrongIdentity, err)
+		return ErrWrongIdentity
 	}
-	return err
+	return ErrMalformedAge
 }
 
 type countingWriter struct {

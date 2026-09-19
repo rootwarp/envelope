@@ -2,6 +2,7 @@ package crypt
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -136,6 +137,52 @@ func TestDecryptRoundTrip(t *testing.T) {
 			}
 			assertSameBytes(t, got.Bytes(), plain)
 		})
+	}
+}
+
+func TestDecryptCanceledReaderIsNotMalformed(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Decrypt(io.Discard, errReader{context.Canceled}, id)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
+	}
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
+
+func TestDecryptMalformedDoesNotQuoteInput(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "AGE-SECRET-KEY-" + "1" + "TESTLEAKMARKER"
+
+	var dst bytes.Buffer
+	_, err = Decrypt(&dst, strings.NewReader(marker+"\n"), id)
+	if !errors.Is(err, ErrMalformedAge) {
+		t.Fatalf("errors.Is(., ErrMalformedAge) = false, err=%v", err)
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatal("decrypt error quoted private input")
+	}
+	if dst.Len() != 0 {
+		t.Fatalf("Decrypt malformed: dst received %d bytes, want 0", dst.Len())
+	}
+
+	got, err := DecryptBytes([]byte(marker+"\n"), id)
+	if !errors.Is(err, ErrMalformedAge) {
+		t.Fatalf("DecryptBytes: errors.Is(., ErrMalformedAge) = false, err=%v", err)
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatal("DecryptBytes error quoted private input")
+	}
+	if got != nil {
+		t.Fatalf("DecryptBytes returned %d-byte slice, want nil", len(got))
 	}
 }
 

@@ -155,6 +155,7 @@ command ever prints file contents or key material.
 | `need at least K usable shards, have H` | Fewer than `k` shards survived the digest check | Find more shards; check that names/indices are right |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
+| `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
 | `failed to decrypt and authenticate payload chunk, file may be corrupted or tampered with: …/manifest.age` | `manifest.age` is damaged or was modified | Use another copy of the manifest |
 
 A failed restore never leaves a partial output file behind.

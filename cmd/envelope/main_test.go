@@ -494,6 +494,42 @@ func TestStaleManifestMessage(t *testing.T) {
 	}
 }
 
+func TestRestorePrivateTextManifestDoesNotPrintKey(t *testing.T) {
+	dir := t.TempDir()
+	id := filepath.Join(dir, "identity.txt")
+	in := filepath.Join(dir, "in.bin")
+	shards := filepath.Join(dir, "shards")
+	out := filepath.Join(dir, "out.bin")
+	mustRun(t, "keygen", "-out", id)
+	writeOpaque(t, in, 32)
+	mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
+
+	idBytes, err := os.ReadFile(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manPath := filepath.Join(shards, "manifest.age")
+	if err := os.WriteFile(manPath, idBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"restore", "-identity", id, "-in", shards, "-out", out}, &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit = %d, want %d", code, exitFailure)
+	}
+	needle := "AGE-SECRET-KEY-" + "1"
+	if bytes.Contains(stderr.Bytes(), []byte(needle)) {
+		t.Fatal("identity material on stderr")
+	}
+	if bytes.Contains(stdout.Bytes(), []byte(needle)) {
+		t.Fatal("identity material on stdout")
+	}
+	if !strings.Contains(stderr.String(), "malformed age file") {
+		t.Fatalf("stderr missing malformed-age diagnostic (len=%d)", stderr.Len())
+	}
+}
+
 func TestDistinguishableFailures(t *testing.T) {
 	tests := []struct {
 		name   string
