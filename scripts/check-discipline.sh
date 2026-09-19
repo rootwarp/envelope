@@ -87,6 +87,35 @@ if pkg_exists ./internal/key/bech32; then
 	done < <(go list -deps -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/key/bech32"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
+# D6: only cmd/envelope may import github.com/urfave/cli/v3.
+while IFS= read -r rec; do
+	[ -n "$rec" ] || continue
+	imp=${rec%% *}
+	pkg=${rec#* }
+	case "$imp" in
+	github.com/urfave/cli/v3 | github.com/urfave/cli/v3/*) ;;
+	*) continue ;;
+	esac
+	if [ "$pkg" != "$mod/cmd/envelope" ]; then
+		fail "D6: $pkg imports github.com/urfave/cli/v3 (only cmd/envelope may)"
+	fi
+done < <(go list -f '{{range .Imports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .TestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}' ./...)
+
+# D7: cmd/envelope imports only pipeline, github.com/urfave/cli/v3 + stdlib.
+if pkg_exists ./cmd/envelope; then
+	while IFS= read -r imp; do
+		[ -n "$imp" ] || continue
+		case "$imp" in
+		"$mod/internal/pipeline" | "github.com/urfave/cli/v3")
+			continue
+			;;
+		esac
+		if [ "$(go list -f '{{.Standard}}' "$imp")" != true ]; then
+			fail "D7: cmd/envelope imports $imp (only pipeline, github.com/urfave/cli/v3 + stdlib allowed)"
+		fi
+	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/cmd/envelope"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./cmd/envelope)
+fi
+
 # FR-35: no os.Stdout / os.Stderr below the entry point …
 if matches=$(grep -rn 'os\.Std\(out\|err\)' --include='*.go' internal/); then
 	fail "FR-35: os.Stdout/os.Stderr under internal/" "$matches"
@@ -96,6 +125,23 @@ matches=$(grep -rn 'os\.Std\(out\|err\)' --include='*.go' cmd/envelope/ 2>/dev/n
 	| grep -v 'os.Exit(run(os.Args\[1:\], os.Stdout, os.Stderr))' || true)
 if [ -n "$matches" ]; then
 	fail "FR-35: os.Stdout/os.Stderr in cmd/envelope besides main's one-liner" "$matches"
+fi
+
+# U1: no framework-global assignment in cmd/envelope (non-test).
+if matches=$(grep -rnE --include='*.go' --exclude='*_test.go' 'cli\.[A-Z][A-Za-z]* *=([^=]|$)' cmd/envelope/); then
+	fail "U1: framework-global assignment in cmd/envelope" "$matches"
+fi
+# U2: no cli.Exit( in cmd/envelope (non-test).
+if matches=$(grep -rn --include='*.go' --exclude='*_test.go' 'cli\.Exit(' cmd/envelope/); then
+	fail "U2: cli.Exit( in cmd/envelope" "$matches"
+fi
+# U3: no signal.Notify( in cmd/envelope (non-test).
+if matches=$(grep -rn --include='*.go' --exclude='*_test.go' 'signal\.Notify(' cmd/envelope/); then
+	fail "U3: signal.Notify( in cmd/envelope" "$matches"
+fi
+# U4: no os.Remove in cmd/envelope (non-test).
+if matches=$(grep -rn --include='*.go' --exclude='*_test.go' 'os\.Remove' cmd/envelope/); then
+	fail "U4: os.Remove in cmd/envelope" "$matches"
 fi
 
 # FR-19: no t.Log of a payload variable.
