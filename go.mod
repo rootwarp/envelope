@@ -7,6 +7,7 @@ toolchain go1.26.6
 require (
 	filippo.io/age v1.3.1
 	github.com/klauspost/reedsolomon v1.14.2
+	github.com/urfave/cli/v3 v3.12.0
 	golang.org/x/crypto v0.45.0
 )
 

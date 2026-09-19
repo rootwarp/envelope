@@ -59,13 +59,13 @@ func TestHelpMatchesContract(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := run(tt.args, &stdout, &stderr)
-			if code != exitUsage {
-				t.Fatalf("exit = %d, want %d", code, exitUsage)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d", code, exitOK)
 			}
 			help := stdout.String() + stderr.String()
 			found := false
 			for _, line := range strings.Split(help, "\n") {
-				if line == tt.contract {
+				if strings.TrimSpace(line) == tt.contract {
 					found = true
 					break
 				}
@@ -104,9 +104,9 @@ func TestExitCodes(t *testing.T) {
 			want: exitUsage,
 		},
 		{
-			name: "flag.ErrHelp",
+			name: "explicit help",
 			args: func(*testing.T) []string { return []string{"keygen", "-h"} },
-			want: exitUsage,
+			want: exitOK,
 		},
 		{
 			name: "-k 0",
