@@ -72,6 +72,7 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "restore -h", fr: "FR-P2-05", args: []string{"restore", "-h"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "restore -help", fr: "FR-P2-05", args: []string{"restore", "-help"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "restore --help", fr: "FR-P2-05", args: []string{"restore", "--help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "recipient -h", fr: "FR-P2-05", args: []string{"recipient", "-h"}, code: exitOK, stdoutNonEmpty: true},
 
 		{name: "-version", fr: "FR-P2-06", args: []string{"-version"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "--version", fr: "FR-P2-06", args: []string{"--version"}, code: exitOK, stdoutNonEmpty: true},
@@ -111,6 +112,11 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "split -- tail (marker)", fr: "FR-P2-04", args: sp("--", usageMark), code: exitUsage, contract: usageSplit},
 		{name: "split leading positional (marker)", fr: "FR-P2-04", args: append([]string{"split", usageMark}, sp()[1:]...), code: exitUsage, contract: usageSplit},
 		{name: "split h positional", fr: "FR-P2-02", args: sp("h"), code: exitUsage, contract: usageSplit},
+
+		{name: "recipient missing", fr: "FR-P2-03", args: []string{"recipient"}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient -identity=", fr: "FR-P2-02", args: []string{"recipient", "-identity="}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient stray (marker)", fr: "FR-P2-04", args: []string{"recipient", "-identity", id, usageMark}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient -identity id -k 3", fr: "FR-P2-03", args: []string{"recipient", "-identity", id, "-k", "3"}, code: exitUsage, contract: usageRecipient},
 
 		{name: "split -k=4 -n=6", fr: "FR-P2-02", args: sp("-k=4", "-n=6"), code: exitOK},
 		{name: "split --k 4 --n 6", fr: "FR-P2-02", args: sp("--k", "4", "--n", "6"), code: exitOK},

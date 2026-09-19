@@ -4,16 +4,18 @@ const (
 	usageKeygen     = "envelope keygen  -out identity.txt"
 	usageSplit      = "envelope split   -identity identity.txt -in secret.bin -out shards/ [-k 3] [-n 5]"
 	usageRestore    = "envelope restore -identity identity.txt -in shards/ -out secret.bin"
+	usageRecipient  = "envelope recipient -identity identity.txt"
 	usageHelp       = "envelope help [command]"
 	usageCompletion = "envelope completion bash|zsh|fish"
 	usageVersion    = "envelope -version"
-	usageAll        = usageKeygen + "\n" + usageSplit + "\n" + usageRestore + "\n" + usageHelp + "\n" + usageCompletion + "\n" + usageVersion + "\n"
+	usageAll        = usageKeygen + "\n" + usageSplit + "\n" + usageRestore + "\n" + usageRecipient + "\n" + usageHelp + "\n" + usageCompletion + "\n" + usageVersion + "\n"
 
-	summaryRoot    = "encrypt one file with age, then Reed-Solomon it into n shards"
-	summaryKeygen  = "create an identity file"
-	summarySplit   = "encrypt a file and write n shards"
-	summaryRestore = "restore a file from k shards"
-	summaryHelp    = "show help for envelope or one command"
+	summaryRoot      = "encrypt one file with age, then Reed-Solomon it into n shards"
+	summaryKeygen    = "create an identity file"
+	summarySplit     = "encrypt a file and write n shards"
+	summaryRestore   = "restore a file from k shards"
+	summaryRecipient = "print the public recipient of an identity file"
+	summaryHelp      = "show help for envelope or one command"
 
 	// urfave has no Examples field; Description keeps newlines (research/04 §1).
 	descriptionKeygen = `Writes one native age identity line, mode 0600.
@@ -34,4 +36,9 @@ Only a leftover .partial blocks restore; an existing destination file is replace
 
 Examples:
   envelope restore -identity identity.txt -in shards/ -out secret.bin`
+	descriptionRecipient = `Prints the public age1 recipient of -identity, one line.
+Never prints the secret key. The identity file is not modified.
+
+Examples:
+  envelope recipient -identity identity.txt`
 )

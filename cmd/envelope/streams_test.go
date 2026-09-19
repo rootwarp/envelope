@@ -112,6 +112,12 @@ func TestErrorPrintedOnce(t *testing.T) {
 				return []string{"restore", "-identity", id, "-in", shards, "-out", out}
 			},
 		},
+		{
+			name: "recipient missing file",
+			args: func(t *testing.T) []string {
+				return []string{"recipient", "-identity", filepath.Join(t.TempDir(), "missing.txt")}
+			},
+		},
 	}
 
 	for _, tt := range tests {
