@@ -51,7 +51,7 @@ func TestVerifyResultClasses(t *testing.T) {
 			name: "two deleted",
 			fixture: func(t *testing.T) (RestoreOptions, []byte) {
 				r, _, w := splitSized(t, 4096)
-				removeShardFiles(t, r.InDir, 3, 4)
+				removeShardFiles(t, r.InDirs[0], 3, 4)
 				return r, w
 			},
 			wantResult:    VerifyDegraded,
@@ -65,7 +65,7 @@ func TestVerifyResultClasses(t *testing.T) {
 			name: "three deleted",
 			fixture: func(t *testing.T) (RestoreOptions, []byte) {
 				r, _, w := splitSized(t, 4096)
-				removeShardFiles(t, r.InDir, 0, 1, 2)
+				removeShardFiles(t, r.InDirs[0], 0, 1, 2)
 				return r, w
 			},
 			wantResult:    VerifyUnrestorable,
@@ -79,7 +79,7 @@ func TestVerifyResultClasses(t *testing.T) {
 			name: "one corrupted",
 			fixture: func(t *testing.T) (RestoreOptions, []byte) {
 				r, _, w := splitSized(t, 4096)
-				flipFileByte(t, filepath.Join(r.InDir, shardFileName(2)), 0)
+				flipFileByte(t, filepath.Join(r.InDirs[0], shardFileName(2)), 0)
 				return r, w
 			},
 			wantResult:     VerifyDamaged,
@@ -96,7 +96,7 @@ func TestVerifyResultClasses(t *testing.T) {
 			fixture: func(t *testing.T) (RestoreOptions, []byte) {
 				r, _, w := splitSized(t, 4096)
 				for _, i := range []int{0, 1, 2} {
-					flipFileByte(t, filepath.Join(r.InDir, shardFileName(i)), 0)
+					flipFileByte(t, filepath.Join(r.InDirs[0], shardFileName(i)), 0)
 				}
 				return r, w
 			},
@@ -113,7 +113,7 @@ func TestVerifyResultClasses(t *testing.T) {
 			var status bytes.Buffer
 			rep, err := Verify(context.Background(), VerifyOptions{
 				IdentityPath: restore.IdentityPath,
-				InDir:        restore.InDir,
+				InDirs:       []string{restore.InDirs[0]},
 			}, &status)
 			if rep == nil {
 				t.Fatal("report is nil")
@@ -192,7 +192,7 @@ func TestVerifyPayloadTamper(t *testing.T) {
 
 	rep, err := Verify(context.Background(), VerifyOptions{
 		IdentityPath: restore.IdentityPath,
-		InDir:        restore.InDir,
+		InDirs:       []string{restore.InDirs[0]},
 	}, nil)
 	if rep == nil {
 		t.Fatal("report is nil")
@@ -231,7 +231,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 			name: "damaged",
 			fixture: func(t *testing.T) RestoreOptions {
 				r, _, _ := splitSized(t, 4096)
-				flipFileByte(t, filepath.Join(r.InDir, shardFileName(2)), 0)
+				flipFileByte(t, filepath.Join(r.InDirs[0], shardFileName(2)), 0)
 				return r
 			},
 			check: func(t *testing.T, err error) {
@@ -244,7 +244,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 			name: "unrestorable",
 			fixture: func(t *testing.T) RestoreOptions {
 				r, _, _ := splitSized(t, 4096)
-				removeShardFiles(t, r.InDir, 0, 1, 2)
+				removeShardFiles(t, r.InDirs[0], 0, 1, 2)
 				return r
 			},
 			check: func(t *testing.T, err error) {
@@ -258,7 +258,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 			before := snapshotTree(t, root)
 			_, err := Verify(context.Background(), VerifyOptions{
 				IdentityPath: restore.IdentityPath,
-				InDir:        restore.InDir,
+				InDirs:       []string{restore.InDirs[0]},
 			}, io.Discard)
 			tc.check(t, err)
 			after := snapshotTree(t, root)
@@ -269,7 +269,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 	t.Run("read-only in", func(t *testing.T) {
 		root := filepath.Dir(t.TempDir())
 		restore, _ := splitFixture(t)
-		in := restore.InDir
+		in := restore.InDirs[0]
 		t.Cleanup(func() {
 			_ = os.Chmod(in, 0o700)
 			entries, err := os.ReadDir(in)
@@ -296,7 +296,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 		before := snapshotTree(t, root)
 		rep, err := Verify(context.Background(), VerifyOptions{
 			IdentityPath: restore.IdentityPath,
-			InDir:        restore.InDir,
+			InDirs:       []string{restore.InDirs[0]},
 		}, io.Discard)
 		if err != nil {
 			t.Fatal(err)
@@ -344,12 +344,12 @@ func TestVerifyStaleManifest(t *testing.T) {
 
 	restore := RestoreOptions{
 		IdentityPath: idPath,
-		InDir:        dirB,
+		InDirs:       []string{dirB},
 		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
 	}
 	rep, verr := Verify(context.Background(), VerifyOptions{
 		IdentityPath: restore.IdentityPath,
-		InDir:        restore.InDir,
+		InDirs:       []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep == nil {
 		t.Fatal("report is nil")
@@ -402,7 +402,7 @@ func TestVerifyMatchesRestoreDiagnostics(t *testing.T) {
 
 	t.Run("MAC mismatch", func(t *testing.T) {
 		restore, _ := splitFixture(t)
-		p := filepath.Join(restore.InDir, "manifest.age")
+		p := filepath.Join(restore.InDirs[0], "manifest.age")
 		fi, err := os.Stat(p)
 		if err != nil {
 			t.Fatal(err)
@@ -416,7 +416,7 @@ func TestVerifyMatchesRestoreDiagnostics(t *testing.T) {
 			t.Skip("chmod 0000 does not deny root")
 		}
 		restore, _ := splitFixture(t)
-		path := filepath.Join(restore.InDir, shardFileName(0))
+		path := filepath.Join(restore.InDirs[0], shardFileName(0))
 		if err := os.Chmod(path, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -431,7 +431,7 @@ func TestVerifyMatchesRestoreDiagnostics(t *testing.T) {
 		rrep, rerr := Restore(context.Background(), restore, &rstatus)
 		vrep, verr := Verify(context.Background(), VerifyOptions{
 			IdentityPath: restore.IdentityPath,
-			InDir:        restore.InDir,
+			InDirs:       []string{restore.InDirs[0]},
 		}, &vstatus)
 
 		// Phase 1 loadShard treats open errors other than ErrNotExist as
@@ -481,7 +481,7 @@ func TestVerifyCancelled(t *testing.T) {
 	cancel()
 	rep, err := Verify(ctx, VerifyOptions{
 		IdentityPath: restore.IdentityPath,
-		InDir:        restore.InDir,
+		InDirs:       []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep != nil {
 		t.Fatal("report is not nil")
@@ -499,7 +499,7 @@ func assertVerifyMatchesRestoreErr(t *testing.T, restore RestoreOptions) {
 	_, rerr := Restore(context.Background(), restore, io.Discard)
 	rep, verr := Verify(context.Background(), VerifyOptions{
 		IdentityPath: restore.IdentityPath,
-		InDir:        restore.InDir,
+		InDirs:       []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep != nil {
 		t.Fatal("report is not nil")

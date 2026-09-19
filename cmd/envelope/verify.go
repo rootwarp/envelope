@@ -23,7 +23,7 @@ func (a *app) verifyCommand() *cli.Command {
 		run: func(ctx context.Context, c *cli.Command) error {
 			rep, err := pipeline.Verify(ctx, pipeline.VerifyOptions{
 				IdentityPath: c.String("identity"),
-				InDir:        c.String("in"),
+				InDirs:       []string{c.String("in")},
 			}, a.stderr)
 			if rep != nil {
 				writeVerifyReport(a.stdout, rep) // first, even when err != nil

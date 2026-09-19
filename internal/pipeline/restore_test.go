@@ -37,6 +37,24 @@ func TestRestoreNoManifest(t *testing.T) {
 	assertNoOutOrPartial(t, restore.OutPath)
 }
 
+// FR-MD-02 InDirs
+func TestEmptyInDirsRejected(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "out.bin") // InDirs
+	for _, dirs := range [][]string{nil, {}} {       // InDirs
+		_, err := Restore(context.Background(), RestoreOptions{ // InDirs
+			InDirs:  dirs,
+			OutPath: outPath, // InDirs
+		}, io.Discard) // InDirs
+		if err == nil || err.Error() != "at least one -in directory is required" { // InDirs
+			t.Fatalf("Restore InDirs=%#v: err=%v", dirs, err)
+		} // InDirs
+		assertNoOutOrPartial(t, outPath) // InDirs
+		_, err = Verify(context.Background(), VerifyOptions{InDirs: dirs}, io.Discard)
+		if err == nil || err.Error() != "at least one -in directory is required" { // InDirs
+			t.Fatalf("Verify InDirs=%#v: err=%v", dirs, err)
+		} // InDirs
+	} // InDirs
+} // InDirs
 func TestRestoreWrongIdentity(t *testing.T) {
 	restore, _ := splitFixture(t)
 	other := filepath.Join(t.TempDir(), "identity.txt")
@@ -54,7 +72,7 @@ func TestRestoreWrongIdentity(t *testing.T) {
 
 func TestRestoreTruncatedManifest(t *testing.T) {
 	restore, _ := splitFixture(t)
-	p := filepath.Join(restore.InDir, "manifest.age")
+	p := filepath.Join(restore.InDirs[0], "manifest.age")
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +93,7 @@ func TestRestoreTruncatedManifest(t *testing.T) {
 
 func TestRestoreTamperedMAC(t *testing.T) {
 	restore, _ := splitFixture(t)
-	p := filepath.Join(restore.InDir, "manifest.age")
+	p := filepath.Join(restore.InDirs[0], "manifest.age")
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +290,7 @@ func TestStaleManifestZeroMatch(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "out.bin")
 	_, err = Restore(context.Background(), RestoreOptions{
 		IdentityPath: idPath,
-		InDir:        dirB,
+		InDirs:       []string{dirB},
 		OutPath:      outPath,
 	}, io.Discard)
 	if !errors.Is(err, ErrStaleManifest) {
@@ -463,7 +481,7 @@ func TestJoinUsesManifestLength(t *testing.T) {
 
 func TestRestoreWithTwoShardsDeleted(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
-	removeShardFiles(t, restore.InDir, 3, 4)
+	removeShardFiles(t, restore.InDirs[0], 3, 4)
 
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)
@@ -477,7 +495,7 @@ func TestRestoreWithTwoShardsDeleted(t *testing.T) {
 
 func TestRestoreWithThreeShardsDeleted(t *testing.T) {
 	restore, _, _ := splitSized(t, 4096)
-	removeShardFiles(t, restore.InDir, 0, 1, 2)
+	removeShardFiles(t, restore.InDirs[0], 0, 1, 2)
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	assertTooFewShards(t, err, 3, 2)
@@ -487,7 +505,7 @@ func TestRestoreWithThreeShardsDeleted(t *testing.T) {
 
 func TestRestoreFromNonContiguousSurvivors(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
-	removeShardFiles(t, restore.InDir, 1, 3)
+	removeShardFiles(t, restore.InDirs[0], 1, 3)
 
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)
@@ -501,7 +519,7 @@ func TestRestoreFromNonContiguousSurvivors(t *testing.T) {
 
 func TestRestoreOversizedShardIsUnusable(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
-	path := filepath.Join(restore.InDir, shardFileName(4))
+	path := filepath.Join(restore.InDirs[0], shardFileName(4))
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -533,7 +551,7 @@ func TestRestoreOversizedShardIsUnusable(t *testing.T) {
 
 func TestRestoreOversizedManifest(t *testing.T) {
 	restore, _ := splitFixture(t)
-	p := filepath.Join(restore.InDir, "manifest.age")
+	p := filepath.Join(restore.InDirs[0], "manifest.age")
 	if err := os.WriteFile(p, make([]byte, crypt.MaxBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +564,7 @@ func TestRestoreOversizedManifest(t *testing.T) {
 
 func TestRestoreDirectoryShardIsUnusable(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
-	path := filepath.Join(restore.InDir, shardFileName(4))
+	path := filepath.Join(restore.InDirs[0], shardFileName(4))
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +604,7 @@ func TestRestoreCanceledDuringShardScan(t *testing.T) {
 func TestRestoreWithOneCorruptShard(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
 	const idx, offset = 2, 0
-	flipFileByte(t, filepath.Join(restore.InDir, shardFileName(idx)), offset)
+	flipFileByte(t, filepath.Join(restore.InDirs[0], shardFileName(idx)), offset)
 
 	rep, err := Restore(context.Background(), restore, io.Discard)
 	if err != nil {
@@ -609,7 +627,7 @@ func TestRestoreWithThreeCorruptShards(t *testing.T) {
 	restore, _, _ := splitSized(t, 4096)
 	const offset = 0
 	for _, i := range []int{0, 1, 2} {
-		flipFileByte(t, filepath.Join(restore.InDir, shardFileName(i)), offset)
+		flipFileByte(t, filepath.Join(restore.InDirs[0], shardFileName(i)), offset)
 	}
 
 	_, err := Restore(context.Background(), restore, io.Discard)
@@ -639,7 +657,7 @@ func TestRestoreTamperedMACEndToEnd(t *testing.T) {
 	testAtReconstruct = func([][]byte) { reconstructed = true }
 	t.Cleanup(func() { testAtReconstruct = nil })
 
-	p := filepath.Join(restore.InDir, "manifest.age")
+	p := filepath.Join(restore.InDirs[0], "manifest.age")
 	fi, err := os.Stat(p)
 	if err != nil {
 		t.Fatal(err)
@@ -699,7 +717,7 @@ func TestForgottenCloseFailsRestore(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "out.bin")
 	_, restoreErr := Restore(context.Background(), RestoreOptions{
 		IdentityPath: split.IdentityPath,
-		InDir:        outDir,
+		InDirs:       []string{outDir},
 		OutPath:      outPath,
 	}, io.Discard)
 
@@ -721,14 +739,14 @@ func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {
 		{
 			name: "three shards deleted",
 			mutate: func(t *testing.T, restore *RestoreOptions) {
-				removeShardFiles(t, restore.InDir, 0, 1, 2)
+				removeShardFiles(t, restore.InDirs[0], 0, 1, 2)
 			},
 		},
 		{
 			name: "three corrupt shards",
 			mutate: func(t *testing.T, restore *RestoreOptions) {
 				for _, i := range []int{0, 1, 2} {
-					flipFileByte(t, filepath.Join(restore.InDir, shardFileName(i)), 0)
+					flipFileByte(t, filepath.Join(restore.InDirs[0], shardFileName(i)), 0)
 				}
 			},
 		},
@@ -745,7 +763,7 @@ func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {
 		{
 			name: "tampered MAC",
 			mutate: func(t *testing.T, restore *RestoreOptions) {
-				p := filepath.Join(restore.InDir, "manifest.age")
+				p := filepath.Join(restore.InDirs[0], "manifest.age")
 				fi, err := os.Stat(p)
 				if err != nil {
 					t.Fatal(err)
@@ -762,7 +780,7 @@ func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {
 				t.Fatal("err = nil, want error")
 			}
 			assertNoOutOrPartial(t, restore.OutPath)
-			assertMarkerAbsentUnder(t, restore.InDir, marker)
+			assertMarkerAbsentUnder(t, restore.InDirs[0], marker)
 			assertMarkerAbsentUnder(t, filepath.Dir(restore.OutPath), marker)
 		})
 	}
@@ -800,7 +818,7 @@ func splitSized(t *testing.T, size int) (RestoreOptions, SplitOptions, []byte) {
 	}
 	return RestoreOptions{
 		IdentityPath: split.IdentityPath,
-		InDir:        outDir,
+		InDirs:       []string{outDir},
 		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
 	}, split, want
 }
@@ -855,7 +873,7 @@ func splitFixture(t *testing.T) (RestoreOptions, SplitOptions) {
 	}
 	return RestoreOptions{
 		IdentityPath: split.IdentityPath,
-		InDir:        outDir,
+		InDirs:       []string{outDir},
 		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
 	}, split
 }
@@ -935,7 +953,7 @@ func splitMarkedRestore(t *testing.T) (RestoreOptions, []byte) {
 	}
 	return RestoreOptions{
 		IdentityPath: split.IdentityPath,
-		InDir:        outDir,
+		InDirs:       []string{outDir},
 		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
 	}, marker
 }
