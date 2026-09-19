@@ -126,6 +126,52 @@ not a restore failure.
 Restore to local storage. On macOS network mounts (SMB), `fsync` can silently
 fall back to a weaker call.
 
+## 4. Verify
+
+```sh
+envelope verify -identity identity.txt -in shards/
+```
+
+| Flag | Required | Meaning |
+|---|---|---|
+| `-identity` | yes | The identity used for `split` |
+| `-in` | yes | Directory holding `manifest.age` and the shards |
+
+The identity is required because the manifest is encrypted. Verify writes
+nothing: `-in` is not modified, it works on read-only media, and it decrypts
+only in memory.
+
+The report is on stdout, always `n + 4` lines. A `(3,5)` set with one missing
+shard and one corrupt shard:
+
+```
+manifest ok: k=3 n=5
+shard-00 ok
+shard-01 missing
+shard-02 corrupt
+shard-03 ok
+shard-04 ok
+usable 3 of 5, need 3
+payload ok: 4096 bytes
+result: damaged
+```
+
+Each shard is `ok`, `missing`, or `corrupt`. The payload line is
+`payload ok: B bytes`, `payload failed`, or `payload skipped` (when fewer than
+`k` shards are usable). `result` is one of four classes:
+
+| Result | Meaning | Exit |
+|---|---|---|
+| `healthy` | All `n` shards ok and the payload ok | 0 |
+| `degraded` | At least `k` ok, some missing, none corrupt, payload ok | 0 |
+| `damaged` | At least one shard corrupt, but the set still restores | 1 |
+| `unrestorable` | Fewer than `k` shards ok, or the payload failed | 1 |
+
+`healthy` and `degraded` print nothing on stderr. `damaged` names the failing
+indices on stderr, then `shard set is damaged: at least one shard failed its
+digest`. A manifest or identity failure prints nothing on stdout and the same
+message restore would.
+
 ## Print the recipient
 
 ```sh
@@ -179,14 +225,14 @@ not part of the contract.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success; explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version`; `recipient` |
-| 1 | Operation failed; the reason is on stderr |
+| 0 | Success (`verify` `healthy`/`degraded`); explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version`; `recipient` |
+| 1 | Operation failed (`verify` `damaged`/`unrestorable`); the reason is on stderr |
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
 stdout carries only what the operator asked a command to produce: version info,
-help text, a completion script, and the recipient string. stderr carries status,
-diagnostics, and errors. Neither stream ever carries payload or key material,
-and neither echoes a positional argument's value.
+help text, a completion script, the recipient string, and the verify report.
+stderr carries status, diagnostics, and errors. Neither stream ever carries
+payload or key material, and neither echoes a positional argument's value.
 
 If `URFAVE_CLI_TRACING=on` is set when the process starts, the library writes
 trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
@@ -206,6 +252,9 @@ source.
 | `output written but directory could not be synced: …` | The restored file was renamed into place, then directory fsync failed | Keep the output; treat crash durability of the directory entry as uncertain |
 | `need at least K usable shards, have H` | Fewer than `k` shards survived the digest check | Find more shards; check that names/indices are right |
 | `unusable shard at index N` | That path exists but is not a usable regular file | Remove the stray directory/FIFO or ignore it if `k` others are good |
+| `result: damaged` | At least one shard is corrupt, but `k` usable shards remain | Replace the corrupt shards; restore still works |
+| `result: unrestorable` | Fewer than `k` shards are usable, or the reconstructed payload failed | Find more intact shards; a payload failure means the reconstructed ciphertext is bad |
+| `shard set is damaged: at least one shard failed its digest` | `verify` found a digest failure on a still-restorable set | Same as `result: damaged`; stderr names the failing indices |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
 | `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |

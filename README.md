@@ -7,7 +7,7 @@ plaintext.
 
 See [docs/usage.md](docs/usage.md) for the full usage guide.
 
-v0 is local files only: `keygen`, `split`, `restore`, `recipient`. Build with
+v0 is local files only: `keygen`, `split`, `restore`, `verify`, `recipient`. Build with
 `go build -o envelope ./cmd/envelope`.
 
 ## v0 usage policy
@@ -76,6 +76,7 @@ mode checks Envelope makes.
 envelope keygen  -out identity.txt
 envelope split   -identity identity.txt -in secret.bin -out shards/ [-k 3] [-n 5]
 envelope restore -identity identity.txt -in shards/ -out secret.bin
+envelope verify -identity identity.txt -in shards/
 envelope recipient -identity identity.txt
 envelope help [command]
 envelope completion bash|zsh|fish
