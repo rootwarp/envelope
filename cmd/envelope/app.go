@@ -87,13 +87,13 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				description: descriptionRestore,
 				flags: []cli.Flag{
 					pathFlag("identity", "identity `FILE` from keygen"),
-					pathFlag("in", "shard `DIR`"),
+					pathSliceFlag("in", "shard `DIR`"),
 					pathFlag("out", "output `FILE`"),
 				},
 				run: func(ctx context.Context, c *cli.Command) error {
 					_, err := pipeline.Restore(ctx, pipeline.RestoreOptions{
 						IdentityPath: c.String("identity"),
-						InDirs:       []string{c.String("in")},
+						InDirs:       c.StringSlice("in"),
 						OutPath:      c.String("out"),
 					}, a.stderr)
 					return err
@@ -107,14 +107,15 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 
 func (a *app) newCommand(s cmdSpec) *cli.Command {
 	return &cli.Command{
-		Name:            s.name,
-		Usage:           s.summary,
-		UsageText:       s.contract,
-		Description:     s.description,
-		Flags:           s.flags,
-		HideHelpCommand: true,
-		OnUsageError:    a.onUsageError(s.contract),
-		Action:          a.noArgs(s.contract, s.run),
+		Name:                      s.name,
+		Usage:                     s.summary,
+		UsageText:                 s.contract,
+		Description:               s.description,
+		Flags:                     s.flags,
+		HideHelpCommand:           true,
+		DisableSliceFlagSeparator: true, // comma is a legal directory character
+		OnUsageError:              a.onUsageError(s.contract),
+		Action:                    a.noArgs(s.contract, s.run),
 	}
 }
 
@@ -157,6 +158,25 @@ func pathFlag(name, usage string) cli.Flag {
 		Validator: func(s string) error {
 			if s == "" {
 				return fmt.Errorf("-%s must not be empty", name)
+			}
+			return nil
+		},
+	}
+}
+
+func pathSliceFlag(name, usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:      name,
+		Usage:     usage,
+		Required:  true,
+		TakesFile: true,
+		// Required treats -in "" as set. The validator sees the accumulated
+		// slice after each element, so it never sees an empty slice.
+		Validator: func(vs []string) error {
+			for _, v := range vs {
+				if v == "" {
+					return fmt.Errorf("-%s must not be empty", name)
+				}
 			}
 			return nil
 		},

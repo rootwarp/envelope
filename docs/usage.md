@@ -83,18 +83,34 @@ of `manifest.age` alongside each. The file name does not matter to restore, but
 **the index does**: `shard-02` must come back as `shard-02`. Restore places
 shards by name, and a shard under the wrong name simply fails its digest check.
 
+Restore from those locations. There is no `cp` back into one directory, and
+read-only media can be passed as `-in` in place:
+
+```sh
+envelope restore -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c -out secret.bin
+```
+
 ## 3. Restore
 
-Gather at least `k` shards and a `manifest.age` into one directory, then:
+Point `-in` at a directory that holds at least `k` shards and a `manifest.age`:
 
 ```sh
 envelope restore -identity identity.txt -in shards/ -out secret.bin
 ```
 
+`-in` may be repeated. Directories are searched in the order given; the first
+usable copy of each shard wins. A `manifest.age` is needed in at least one of
+them. Restore from the disks the shards already live on — there is no gather
+step:
+
+```sh
+envelope restore -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c -out secret.bin
+```
+
 | Flag | Required | Meaning |
 |---|---|---|
 | `-identity` | yes | The identity used for `split` |
-| `-in` | yes | Directory holding `manifest.age` and the surviving shards |
+| `-in` | yes | Directory of shards; repeatable. A manifest is needed in at least one |
 | `-out` | yes | Where to write the restored file |
 
 Output, on stderr:
@@ -115,6 +131,19 @@ failed digest at index 1
 unusable shard at index 4
 restored 4096 bytes to secret.bin
 ```
+
+With two or more `-in` directories, the same lines name the path as given:
+
+```
+failed digest at index 1: /mnt/a/shard-01
+unusable shard at index 4: /mnt/b/shard-04
+restored 4096 bytes to secret.bin
+```
+
+When two or more `-in` values are given, each directory must exist, be a
+directory, and be readable. A bad path exits 1 as `-in <path>: <reason>` and
+writes no output. A single `-in` that does not exist still reports
+`no manifest.age in the shard directory`.
 
 As long as `k` shards pass, restore succeeds. A leftover special file at a
 shard path, or a shard whose size is not the authenticated stripe length, is
@@ -257,6 +286,8 @@ source.
 | `shard set is damaged: at least one shard failed its digest` | `verify` found a digest failure on a still-restorable set | Same as `result: damaged`; stderr names the failing indices |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
+| `conflicting manifests: A/manifest.age and B/manifest.age describe different shard sets` | Two `-in` directories hold authentic manifests for different splits | Use directories from the same split; exits 1 |
+| `-in <path>: <reason>` | A `-in` path does not exist, is not a directory, or cannot be read | Only when two or more `-in` values are given; fix the path. A single missing `-in` still reports `no manifest.age…` |
 | `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |
 | `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
 | `failed to decrypt and authenticate payload chunk, file may be corrupted or tampered with: …/manifest.age` | `manifest.age` is damaged or was modified | Use another copy of the manifest |

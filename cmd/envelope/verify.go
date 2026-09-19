@@ -18,12 +18,12 @@ func (a *app) verifyCommand() *cli.Command {
 		description: descriptionVerify,
 		flags: []cli.Flag{
 			pathFlag("identity", "identity `FILE` from keygen"),
-			pathFlag("in", "shard `DIR`"),
+			pathSliceFlag("in", "shard `DIR`"),
 		},
 		run: func(ctx context.Context, c *cli.Command) error {
 			rep, err := pipeline.Verify(ctx, pipeline.VerifyOptions{
 				IdentityPath: c.String("identity"),
-				InDirs:       []string{c.String("in")},
+				InDirs:       c.StringSlice("in"),
 			}, a.stderr)
 			if rep != nil {
 				writeVerifyReport(a.stdout, rep) // first, even when err != nil

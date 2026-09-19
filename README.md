@@ -93,4 +93,10 @@ envelope completion bash|zsh|fish
 envelope -version
 ```
 
+Shards already on separate volumes, with no gather step:
+
+```
+envelope restore -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c -out secret.bin
+```
+
 `envelope <command> -h` prints help.

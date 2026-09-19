@@ -33,17 +33,21 @@ manifest.age is written last. A directory without it is an incomplete split — 
 Examples:
   envelope split -identity identity.txt -in secret.bin -out shards/ -k 3 -n 5`
 	descriptionRestore = `Restores a file from at least k shards and a manifest.age in -in.
+-in may be repeated. Directories are searched in the order given; the first usable copy of each shard wins. A manifest is needed in at least one of them.
 The result is mode 0600. An existing -out is overwritten.
 Only a leftover .partial blocks restore; an existing destination file is replaced without asking.
 
 Examples:
-  envelope restore -identity identity.txt -in shards/ -out secret.bin`
+  envelope restore -identity identity.txt -in shards/ -out secret.bin
+  envelope restore -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c -out secret.bin`
 	descriptionVerify = `Checks whether a shard set would restore, without writing a file.
 healthy and degraded exit 0; damaged and unrestorable exit 1 with the report still on stdout.
 The identity is required because the manifest is encrypted. -in is not modified.
+-in may be repeated. Directories are searched in the order given; the first usable copy of each shard wins. A manifest is needed in at least one of them.
 
 Examples:
-  envelope verify -identity identity.txt -in shards/`
+  envelope verify -identity identity.txt -in shards/
+  envelope verify -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c`
 	descriptionRecipient = `Prints the public age1 recipient of -identity, one line.
 Never prints the secret key. The identity file is not modified.
 
