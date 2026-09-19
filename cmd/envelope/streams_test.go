@@ -128,6 +128,58 @@ func TestErrorPrintedOnce(t *testing.T) {
 		})
 	}
 
+	// verify prints the report on stdout; pin that the mapped error is once.
+	for _, tt := range []struct {
+		name string
+		args func(*testing.T) []string
+	}{
+		{
+			name: "verify damaged",
+			args: func(t *testing.T) []string {
+				id, shards, _ := mustSplitFixture(t)
+				xorFileByte(t, filepath.Join(shards, "shard-02"), 0)
+				return []string{"verify", "-identity", id, "-in", shards}
+			},
+		},
+		{
+			name: "verify too few shards",
+			args: func(t *testing.T) []string {
+				id, shards, _ := mustSplitFixture(t)
+				for _, name := range []string{"shard-00", "shard-01", "shard-02"} {
+					if err := os.Remove(filepath.Join(shards, name)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return []string{"verify", "-identity", id, "-in", shards}
+			},
+		},
+		{
+			name: "verify stale manifest",
+			args: func(t *testing.T) []string {
+				return staleVerifyArgs(t)
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(tt.args(t), &stdout, &stderr)
+			if code != exitFailure {
+				t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitFailure, stderr.String())
+			}
+			if stdout.Len() == 0 {
+				t.Fatal("stdout empty, want verify report")
+			}
+			got := stderr.String()
+			line := lastLine(got)
+			if line == "" {
+				t.Fatal("stderr empty")
+			}
+			if n := strings.Count(got, line); n != 1 {
+				t.Fatalf("error %q printed %d times (stderr len=%d)", line, n, stderr.Len())
+			}
+		})
+	}
+
 	t.Run("build info unavailable", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		err := writeVersion(&stdout, nil, false)

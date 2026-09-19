@@ -73,6 +73,7 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "restore -help", fr: "FR-P2-05", args: []string{"restore", "-help"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "restore --help", fr: "FR-P2-05", args: []string{"restore", "--help"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "recipient -h", fr: "FR-P2-05", args: []string{"recipient", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "verify -h", fr: "FR-P2-05", args: []string{"verify", "-h"}, code: exitOK, stdoutNonEmpty: true},
 
 		{name: "-version", fr: "FR-P2-06", args: []string{"-version"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "--version", fr: "FR-P2-06", args: []string{"--version"}, code: exitOK, stdoutNonEmpty: true},
@@ -117,6 +118,11 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "recipient -identity=", fr: "FR-P2-02", args: []string{"recipient", "-identity="}, code: exitUsage, contract: usageRecipient},
 		{name: "recipient stray (marker)", fr: "FR-P2-04", args: []string{"recipient", "-identity", id, usageMark}, code: exitUsage, contract: usageRecipient},
 		{name: "recipient -identity id -k 3", fr: "FR-P2-03", args: []string{"recipient", "-identity", id, "-k", "3"}, code: exitUsage, contract: usageRecipient},
+
+		{name: "verify missing", fr: "FR-P2-03", args: []string{"verify"}, code: exitUsage, contract: usageVerify, reason: `"identity, in"`},
+		{name: "verify -k 3", fr: "FR-P2-03", args: []string{"verify", "-identity", id, "-in", dir, "-k", "3"}, code: exitUsage, contract: usageVerify},
+		{name: "verify -out o", fr: "FR-P2-03", args: []string{"verify", "-identity", id, "-in", dir, "-out", "o"}, code: exitUsage, contract: usageVerify},
+		{name: "verify stray (marker)", fr: "FR-P2-04", args: []string{"verify", "-identity", id, "-in", dir, usageMark}, code: exitUsage, contract: usageVerify},
 
 		{name: "split -k=4 -n=6", fr: "FR-P2-02", args: sp("-k=4", "-n=6"), code: exitOK},
 		{name: "split --k 4 --n 6", fr: "FR-P2-02", args: sp("--k", "4", "--n", "6"), code: exitOK},

@@ -99,6 +99,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 					return err
 				},
 			}),
+			a.verifyCommand(),
 			a.recipientCommand(),
 		},
 	}
