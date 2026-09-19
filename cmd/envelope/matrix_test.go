@@ -49,11 +49,14 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "bare", fr: "FR-P2-03", args: nil, code: exitUsage, contract: usageAll},
 		{name: "unknown cmd (marker)", fr: "FR-P2-04", args: []string{usageMark}, code: exitUsage, contract: usageAll},
 		// M2 flips these three to exit 0; pin only exit and empty stdout here.
-		{name: "help", fr: "FR-P2-03", args: []string{"help"}, code: exitUsage},
-		{name: "h", fr: "FR-P2-03", args: []string{"h"}, code: exitUsage},
-		{name: "help split", fr: "FR-P2-03", args: []string{"help", "split"}, code: exitUsage},
+		{name: "help", fr: "FR-P2-03", args: []string{"help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "h", fr: "FR-P2-03", args: []string{"h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "help split", fr: "FR-P2-03", args: []string{"help", "split"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "help unknown (marker)", fr: "FR-P2-04", args: []string{"help", usageMark}, code: exitUsage, contract: usageAll},
 		{name: "help -bogus", fr: "FR-P2-03", args: []string{"help", "-bogus"}, code: exitUsage, reason: "flag provided but not defined: -bogus"},
+		{name: "help -h", fr: "FR-P2-05", args: []string{"help", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "help -h nope", fr: "FR-P2-05", args: []string{"help", "-h", "nope"}, code: exitUsage, exactStderr: usageAll},
+		{name: "h split", fr: "FR-P2-09", args: []string{"h", "split"}, code: exitOK, stdoutNonEmpty: true},
 		{name: "-h unknown (marker)", fr: "FR-P2-05", args: []string{"-h", usageMark}, code: exitUsage, exactStderr: usageAll},
 		{name: "split -h unknown (marker)", fr: "FR-P2-05", args: []string{"split", "-h", usageMark}, code: exitUsage, exactStderr: usageAll},
 

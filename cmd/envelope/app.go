@@ -40,6 +40,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 		OnUsageError:    a.onUsageError(usageAll),
 		Action:          a.rootAction,
 		Commands: []*cli.Command{
+			a.helpCommand(),
 			a.newCommand(cmdSpec{
 				name:     "keygen",
 				summary:  summaryKeygen,
