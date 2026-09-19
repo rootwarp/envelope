@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/urfave/cli/v3"
 )
 
 // FR-P2-09
@@ -128,4 +131,72 @@ func commandsSection(help string) string {
 		}
 	}
 	return s
+}
+
+// FR-P2-08
+func TestHelpContent(t *testing.T) {
+	pages := []struct {
+		cmd  string
+		want []string
+	}{
+		{cmd: "keygen", want: []string{"refuses to overwrite", "unrecoverable", "Examples:"}},
+		{cmd: "split", want: []string{"(default: 3)", "(default: 5)", "1 ≤ k < n ≤ 256", "absent or empty", "written last", "Examples:"}},
+		{cmd: "restore", want: []string{"is overwritten", ".partial", "Examples:"}},
+	}
+	for _, tt := range pages {
+		t.Run(tt.cmd, func(t *testing.T) {
+			help := commandHelp(t, []string{tt.cmd, "--help"})
+			for _, s := range tt.want {
+				if !strings.Contains(help, s) {
+					t.Errorf("%s --help missing %q\n%s", tt.cmd, s, help)
+				}
+			}
+		})
+	}
+
+	// Walk Commands (same list as TestEveryCommandHasHooks) so a later node
+	// cannot introduce identity material or a machine path (C14).
+	root := newApp(io.Discard, io.Discard)
+	type helpArgs struct {
+		name string
+		args []string
+	}
+	scans := []helpArgs{{name: "root", args: []string{"--help"}}}
+	var walk func(prefix []string, cmds []*cli.Command)
+	walk = func(prefix []string, cmds []*cli.Command) {
+		for _, c := range cmds {
+			path := append(append([]string{}, prefix...), c.Name)
+			scans = append(scans, helpArgs{name: strings.Join(path, " "), args: append(append([]string{}, path...), "--help")})
+			walk(path, c.Commands)
+		}
+	}
+	walk(nil, root.Commands)
+
+	secret := "AGE-SECRET-KEY-"
+	for _, s := range scans {
+		t.Run("scan "+s.name, func(t *testing.T) {
+			help := commandHelp(t, s.args)
+			if strings.Contains(strings.ToUpper(help), secret) {
+				t.Errorf("%s help contains identity material", s.name)
+			}
+			for _, p := range []string{"/Users/", "/home/"} {
+				if strings.Contains(help, p) {
+					t.Errorf("%s help contains %q", s.name, p)
+				}
+			}
+		})
+	}
+}
+
+func commandHelp(t *testing.T, args []string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := run(args, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("%v exit=%d want %d\nstdout=%q\nstderr=%q", args, code, exitOK, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("%v stderr = %q, want empty", args, stderr.String())
+	}
+	return stdout.String()
 }

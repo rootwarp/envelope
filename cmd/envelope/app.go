@@ -42,23 +42,25 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 		Commands: []*cli.Command{
 			a.helpCommand(),
 			a.newCommand(cmdSpec{
-				name:     "keygen",
-				summary:  summaryKeygen,
-				contract: usageKeygen,
-				flags:    []cli.Flag{pathFlag("out", "identity `FILE`")},
+				name:        "keygen",
+				summary:     summaryKeygen,
+				contract:    usageKeygen,
+				description: descriptionKeygen,
+				flags:       []cli.Flag{pathFlag("out", "identity `FILE`")},
 				run: func(_ context.Context, c *cli.Command) error {
 					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out")}, a.stderr)
 				},
 			}),
 			a.newCommand(cmdSpec{
-				name:     "split",
-				summary:  summarySplit,
-				contract: usageSplit,
+				name:        "split",
+				summary:     summarySplit,
+				contract:    usageSplit,
+				description: descriptionSplit,
 				flags: []cli.Flag{
 					pathFlag("identity", "identity `FILE` from keygen"),
 					pathFlag("in", "input `FILE`"),
 					pathFlag("out", "output `DIR`"),
-					&cli.IntFlag{Name: "k", Value: defaultK, Usage: "data shards"},
+					&cli.IntFlag{Name: "k", Value: defaultK, Usage: "shards needed to restore"},
 					&cli.IntFlag{Name: "n", Value: defaultN, Usage: "total shards"},
 				},
 				run: func(ctx context.Context, c *cli.Command) error {
@@ -77,9 +79,10 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				},
 			}),
 			a.newCommand(cmdSpec{
-				name:     "restore",
-				summary:  summaryRestore,
-				contract: usageRestore,
+				name:        "restore",
+				summary:     summaryRestore,
+				contract:    usageRestore,
+				description: descriptionRestore,
 				flags: []cli.Flag{
 					pathFlag("identity", "identity `FILE` from keygen"),
 					pathFlag("in", "shard `DIR`"),
