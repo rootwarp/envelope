@@ -85,13 +85,23 @@ type shardSet struct {
 	failed  []int
 	missing []int
 	have    int
+	multi   bool // I4: true after dedup when two or more distinct directories remain
 }
 
 func openShardSet(ctx context.Context, identityPath string, inDirs []string, status io.Writer) (*shardSet, error) {
 	if len(inDirs) == 0 {
 		return nil, errors.New("at least one -in directory is required")
 	}
-	manPath := filepath.Join(inDirs[0], "manifest.age")
+	dirs, err := resolveInDirs(inDirs)
+	if err != nil {
+		return nil, err
+	}
+	// I4: format decisions follow the deduplicated list, never len(inDirs).
+	// Two spellings of one directory must stay single-directory output (FR-MD-06, AD-3).
+	multi := len(dirs) > 1
+	dir := dirs[0].given
+
+	manPath := filepath.Join(dir, "manifest.age")
 	blob, err := readManifestBlob(manPath)
 	if err != nil {
 		return nil, err
@@ -129,7 +139,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sta
 	var missing []int
 	var failed []int
 	for i := 0; i < m.N; i++ {
-		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(inDirs[0], shardFileName(i)), m.StripeLen)
+		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(dir, shardFileName(i)), m.StripeLen)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -171,6 +181,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sta
 		failed:  failed,
 		missing: missing,
 		have:    erasure.Usable(shards),
+		multi:   multi,
 	}, nil
 }
 
