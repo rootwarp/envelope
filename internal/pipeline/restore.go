@@ -367,6 +367,7 @@ func (c *contextReader) Read(p []byte) (int, error) {
 var testAtReconstruct func(shards [][]byte)
 
 // testAtJoin observes the joined ciphertext. Tests assert length and SHA-256.
+// It may mutate ct in place; Verify's tamper test relies on it.
 var testAtJoin func(ct []byte, outSize int64)
 
 // testWrapDst wraps the decrypt destination. Tests inject a mid-copy error or
