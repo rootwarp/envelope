@@ -79,19 +79,26 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	// return nil while emitting a different SHA-256. FR-15.
 	shards := make([][]byte, m.N)
 	var missing []int
+	var failed []int
 	for i := 0; i < m.N; i++ {
-		b, rerr := os.ReadFile(filepath.Join(opts.InDir, shardFileName(i)))
+		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(opts.InDir, shardFileName(i)))
 		if rerr != nil {
-			if errors.Is(rerr, os.ErrNotExist) {
-				missing = append(missing, i)
-				continue
-			}
 			return nil, rerr
+		}
+		if miss {
+			missing = append(missing, i)
+			continue
+		}
+		if unusable {
+			failed = append(failed, i)
+			if status != nil {
+				fmt.Fprintf(status, "unusable shard at index %d\n", i)
+			}
+			continue
 		}
 		shards[i] = b
 	}
 
-	var failed []int
 	for i := 0; i < m.N; i++ {
 		if shards[i] == nil {
 			continue
@@ -103,11 +110,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		// Join would emit wrong bytes. FR-14.
 		erasure.Erase(shards, i)
 		failed = append(failed, i)
-	}
-
-	// FR-26: indices only, never shard bytes.
-	if status != nil {
-		for _, i := range failed {
+		if status != nil {
 			fmt.Fprintf(status, "failed digest at index %d\n", i)
 		}
 	}
@@ -163,6 +166,32 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		MissingIndex: missing,
 		PlaintextLen: n,
 	}, nil
+}
+
+func loadShard(ctx context.Context, path string) (data []byte, missing, unusable bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, false, err
+	}
+	f, err := os.OpenFile(path, readOpenFlags, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, true, false, nil
+		}
+		return nil, false, true, nil
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, false, true, nil
+	}
+	if !st.Mode().IsRegular() {
+		return nil, false, true, nil
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, false, true, nil
+	}
+	return b, false, false, nil
 }
 
 // The named results exist for err alone — the deferred cleanup assigns to it.

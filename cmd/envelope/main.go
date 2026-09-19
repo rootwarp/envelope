@@ -36,10 +36,14 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 // run is the entire command. It writes only to the injected writers. FR-35.
 func run(args []string, stdout, stderr io.Writer) int {
-	// FR-34. signal.NotifyContext restores the default handler on stop(), so a
-	// second Ctrl-C during cleanup still kills the process.
+	// FR-34. Restore the default handler as soon as the first signal arrives,
+	// not only after runErr returns, so a second Ctrl-C kills a stuck command.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	return exitCode(runErr(ctx, args, stdout, stderr), stderr)
 }
 

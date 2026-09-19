@@ -485,6 +485,45 @@ func TestRestoreFromNonContiguousSurvivors(t *testing.T) {
 	assertSameBytes(t, got, want)
 }
 
+func TestRestoreDirectoryShardIsUnusable(t *testing.T) {
+	restore, _, want := splitSized(t, 1<<20)
+	path := filepath.Join(restore.InDir, shardFileName(4))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var status bytes.Buffer
+	rep, err := Restore(context.Background(), restore, &status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+	if rep == nil || len(rep.FailedIndex) != 1 || rep.FailedIndex[0] != 4 {
+		t.Fatalf("FailedIndex = %v, want [4]", rep.FailedIndex)
+	}
+	if !strings.Contains(status.String(), "unusable shard at index 4") {
+		t.Fatalf("status %q missing unusable line", status.String())
+	}
+}
+
+func TestRestoreCanceledDuringShardScan(t *testing.T) {
+	restore, _ := splitFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Restore(ctx, restore, io.Discard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
 func TestRestoreWithOneCorruptShard(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
 	const idx, offset = 2, 0

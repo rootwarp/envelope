@@ -102,15 +102,17 @@ The result is mode `0600`. Envelope writes `secret.bin.partial` first, syncs it,
 then renames it into place; on any failure or Ctrl-C the `.partial` is deleted.
 
 Before anything is written, every shard is checked against the digests in the
-manifest. Missing shards are skipped silently; corrupt ones are reported and
-skipped:
+manifest. Missing shards are skipped silently; corrupt ones and unusable
+inputs (a directory or FIFO at a shard path) are reported and skipped:
 
 ```
 failed digest at index 1
+unusable shard at index 4
 restored 4096 bytes to secret.bin
 ```
 
-As long as `k` shards pass, restore succeeds.
+As long as `k` shards pass, restore succeeds. A leftover special file at a
+shard path is not a restore failure.
 
 > **`-out` is overwritten if it exists.** Only a leftover `.partial` blocks
 > restore; an existing destination file is replaced without asking.
@@ -153,6 +155,7 @@ command ever prints file contents or key material.
 | `no manifest.age in the shard directory: …` | `manifest.age` wasn't copied into `-in` | Copy any surviving copy of the manifest in |
 | `a .partial file from a previous run is present: …` | An earlier restore was killed hard (e.g. power loss) | Delete the `.partial` — it may hold plaintext — then retry |
 | `need at least K usable shards, have H` | Fewer than `k` shards survived the digest check | Find more shards; check that names/indices are right |
+| `unusable shard at index N` | That path exists but is not a usable regular file | Remove the stray directory/FIFO or ignore it if `k` others are good |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
 | `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
