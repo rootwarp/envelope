@@ -116,6 +116,12 @@ func TestUsageMatrix(t *testing.T) {
 		{name: "split --k 4 --n 6", fr: "FR-P2-02", args: sp("--k", "4", "--n", "6"), code: exitOK},
 		{name: "split --k=4 --n=6", fr: "FR-P2-02", args: sp("--k=4", "--n=6"), code: exitOK},
 		{name: "split -k 4 -k 2 (last wins)", fr: "FR-P2-02", args: sp("-k", "4", "-k", "2"), code: exitOK},
+
+		{name: "completion", fr: "FR-P2-11", args: []string{"completion"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion MARK", fr: "FR-P2-11", args: []string{"completion", usageMark}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash extra", fr: "FR-P2-11", args: []string{"completion", "bash", "extra"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash -bogus", fr: "FR-P2-11", args: []string{"completion", "bash", "-bogus"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash", fr: "FR-P2-11", args: []string{"completion", "bash"}, code: exitOK, stdoutNonEmpty: true},
 	}
 
 	for _, r := range rows {
