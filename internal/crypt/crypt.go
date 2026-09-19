@@ -54,17 +54,30 @@ func EncryptBytes(plaintext []byte, r age.Recipient) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// MaxBytes is the cap for DecryptBytes (manifest bodies). Payload decrypt
+// streams to a file and is not subject to this limit.
+const MaxBytes = 1 << 20
+
+// ErrBlobTooLarge is returned when a DecryptBytes input or body exceeds MaxBytes.
+var ErrBlobTooLarge = errors.New("age blob exceeds size limit")
+
 // DecryptBytes decrypts ciphertext in memory. It returns the plaintext only
 // after io.ReadAll succeeds: age authenticates each 64 KiB chunk at Read time,
 // so returning earlier would hand the caller unauthenticated bytes.
 func DecryptBytes(ciphertext []byte, id age.Identity) ([]byte, error) {
+	if int64(len(ciphertext)) > MaxBytes {
+		return nil, ErrBlobTooLarge
+	}
 	r, err := age.Decrypt(bytes.NewReader(ciphertext), id)
 	if err != nil {
 		return nil, wrapDecryptErr(err)
 	}
-	plain, err := io.ReadAll(r)
+	plain, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(plain)) > MaxBytes {
+		return nil, ErrBlobTooLarge
 	}
 	return plain, nil
 }

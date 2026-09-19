@@ -296,9 +296,10 @@ func mkdirAllDurable(path string, perm os.FileMode) error {
 }
 
 var (
-	ErrOutDirNotEmpty = errors.New("output directory is not empty")                  // FR-31
-	ErrPartialExists  = errors.New("a .partial file from a previous run is present") // FR-33
-	ErrNoManifest     = errors.New("no manifest.age in the shard directory")         // FR-12, FR-26
-	ErrStaleManifest  = errors.New("no shard matched the manifest")                  // FR-26
-	ErrDirSync        = errors.New("output written but directory could not be synced")
+	ErrOutDirNotEmpty   = errors.New("output directory is not empty")                  // FR-31
+	ErrPartialExists    = errors.New("a .partial file from a previous run is present") // FR-33
+	ErrNoManifest       = errors.New("no manifest.age in the shard directory")         // FR-12, FR-26
+	ErrStaleManifest    = errors.New("no shard matched the manifest")                  // FR-26
+	ErrDirSync          = errors.New("output written but directory could not be synced")
+	ErrManifestTooLarge = errors.New("manifest.age exceeds size limit")
 )

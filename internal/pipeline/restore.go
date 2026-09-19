@@ -44,11 +44,8 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	}
 
 	manPath := filepath.Join(opts.InDir, "manifest.age")
-	blob, err := os.ReadFile(manPath)
+	blob, err := readManifestBlob(manPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("%w: %s", ErrNoManifest, manPath)
-		}
 		return nil, err
 	}
 
@@ -81,7 +78,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	var missing []int
 	var failed []int
 	for i := 0; i < m.N; i++ {
-		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(opts.InDir, shardFileName(i)))
+		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(opts.InDir, shardFileName(i)), m.StripeLen)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -168,7 +165,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	}, nil
 }
 
-func loadShard(ctx context.Context, path string) (data []byte, missing, unusable bool, err error) {
+func loadShard(ctx context.Context, path string, stripeLen int64) (data []byte, missing, unusable bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, false, err
 	}
@@ -184,14 +181,40 @@ func loadShard(ctx context.Context, path string) (data []byte, missing, unusable
 	if err != nil {
 		return nil, false, true, nil
 	}
-	if !st.Mode().IsRegular() {
+	if !st.Mode().IsRegular() || st.Size() != stripeLen {
 		return nil, false, true, nil
 	}
-	b, err := io.ReadAll(f)
-	if err != nil {
+	b, err := io.ReadAll(io.LimitReader(f, stripeLen+1))
+	if err != nil || int64(len(b)) != stripeLen {
 		return nil, false, true, nil
 	}
 	return b, false, false, nil
+}
+
+func readManifestBlob(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, readOpenFlags, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrNoManifest, path)
+		}
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("manifest.age is not a regular file: %s", path)
+	}
+	if st.Size() > crypt.MaxBytes {
+		return nil, fmt.Errorf("%w: %s", ErrManifestTooLarge, path)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, crypt.MaxBytes))
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 // The named results exist for err alone — the deferred cleanup assigns to it.

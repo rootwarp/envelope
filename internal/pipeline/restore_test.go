@@ -14,6 +14,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/erasure"
 	"github.com/rootwarp/envelope/internal/key"
 )
@@ -496,6 +497,51 @@ func TestRestoreFromNonContiguousSurvivors(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSameBytes(t, got, want)
+}
+
+func TestRestoreOversizedShardIsUnusable(t *testing.T) {
+	restore, _, want := splitSized(t, 1<<20)
+	path := filepath.Join(restore.InDir, shardFileName(4))
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte{0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var status bytes.Buffer
+	rep, err := Restore(context.Background(), restore, &status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(restore.OutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, want)
+	if rep == nil || len(rep.FailedIndex) != 1 || rep.FailedIndex[0] != 4 {
+		t.Fatalf("FailedIndex = %v, want [4]", rep.FailedIndex)
+	}
+	if !strings.Contains(status.String(), "unusable shard at index 4") {
+		t.Fatalf("status %q missing unusable line", status.String())
+	}
+}
+
+func TestRestoreOversizedManifest(t *testing.T) {
+	restore, _ := splitFixture(t)
+	p := filepath.Join(restore.InDir, "manifest.age")
+	if err := os.WriteFile(p, make([]byte, crypt.MaxBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Restore(context.Background(), restore, io.Discard)
+	if !errors.Is(err, ErrManifestTooLarge) {
+		t.Fatalf("errors.Is(., ErrManifestTooLarge) = false, err=%v", err)
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
 }
 
 func TestRestoreDirectoryShardIsUnusable(t *testing.T) {

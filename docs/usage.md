@@ -115,7 +115,8 @@ restored 4096 bytes to secret.bin
 ```
 
 As long as `k` shards pass, restore succeeds. A leftover special file at a
-shard path is not a restore failure.
+shard path, or a shard whose size is not the authenticated stripe length, is
+not a restore failure.
 
 > **`-out` is overwritten if it exists.** Only a leftover `.partial` blocks
 > restore; an existing destination file is replaced without asking.
@@ -162,6 +163,7 @@ command ever prints file contents or key material.
 | `unusable shard at index N` | That path exists but is not a usable regular file | Remove the stray directory/FIFO or ignore it if `k` others are good |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
+| `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |
 | `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
 | `failed to decrypt and authenticate payload chunk, file may be corrupted or tampered with: …/manifest.age` | `manifest.age` is damaged or was modified | Use another copy of the manifest |
 

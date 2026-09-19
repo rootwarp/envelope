@@ -140,6 +140,20 @@ func TestDecryptRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecryptBytesRejectsOversize(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecryptBytes(make([]byte, MaxBytes+1), id)
+	if !errors.Is(err, ErrBlobTooLarge) {
+		t.Fatalf("errors.Is(., ErrBlobTooLarge) = false, err=%v", err)
+	}
+	if got != nil {
+		t.Fatalf("DecryptBytes returned %d-byte slice, want nil", len(got))
+	}
+}
+
 func TestDecryptCanceledReaderIsNotMalformed(t *testing.T) {
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
