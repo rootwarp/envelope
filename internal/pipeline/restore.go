@@ -43,13 +43,58 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	manPath := filepath.Join(opts.InDir, "manifest.age")
+	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDir, status)
+	if err != nil {
+		return nil, err
+	}
+	defer set.id.Zero()
+
+	if err := set.usableErr(); err != nil {
+		return nil, err
+	}
+
+	ct, err := set.ciphertext()
+	if err != nil {
+		return nil, err
+	}
+
+	n, err := decryptToFile(ctx, opts.OutPath, ct, set.id)
+	if err != nil {
+		return nil, err
+	}
+
+	if status != nil {
+		fmt.Fprintf(status, "restored %d bytes to %s\n", n, opts.OutPath)
+	}
+
+	return &RestoreReport{
+		OutPath:      opts.OutPath,
+		K:            set.m.K,
+		N:            set.m.N,
+		Usable:       set.have,
+		FailedIndex:  set.failed,
+		MissingIndex: set.missing,
+		PlaintextLen: n,
+	}, nil
+}
+
+type shardSet struct {
+	m       *manifest.Manifest
+	id      *key.Identity
+	shards  [][]byte
+	failed  []int
+	missing []int
+	have    int
+}
+
+func openShardSet(ctx context.Context, identityPath, inDir string, status io.Writer) (*shardSet, error) {
+	manPath := filepath.Join(inDir, "manifest.age")
 	blob, err := readManifestBlob(manPath)
 	if err != nil {
 		return nil, err
 	}
 
-	id, err := key.Load(opts.IdentityPath)
+	id, err := key.Load(identityPath)
 	if err != nil {
 		return nil, err
 	}
@@ -58,16 +103,19 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		id.Zero()
 		return nil, err
 	}
+	ok := false
 	defer func() {
 		clear(macKey)
-		id.Zero()
+		if !ok {
+			id.Zero()
+		}
 	}()
 
 	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
 	if err != nil {
 		path := manPath
 		if errors.Is(err, crypt.ErrWrongIdentity) {
-			path = opts.IdentityPath
+			path = identityPath
 		}
 		return nil, fmt.Errorf("%w: %s", err, path)
 	}
@@ -78,7 +126,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	var missing []int
 	var failed []int
 	for i := 0; i < m.N; i++ {
-		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(opts.InDir, shardFileName(i)), m.StripeLen)
+		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(inDir, shardFileName(i)), m.StripeLen)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -112,57 +160,53 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		}
 	}
 
-	have := erasure.Usable(shards)
-	if have < m.K {
-		tf := &erasure.TooFewShardsError{Need: m.K, Have: have}
-		if have == 0 {
+	ok = true
+	return &shardSet{
+		m:       m,
+		id:      id,
+		shards:  shards,
+		failed:  failed,
+		missing: missing,
+		have:    erasure.Usable(shards),
+	}, nil
+}
+
+func (s *shardSet) usableErr() error {
+	if s.have < s.m.K {
+		tf := &erasure.TooFewShardsError{Need: s.m.K, Have: s.have}
+		if s.have == 0 {
 			// MAC binds the owner, not a point in time; every current shard
 			// screens as corrupt. Wrap so M7.2 can name the diagnosis without
 			// a type change. Plan R6.
-			return nil, fmt.Errorf("%d of %d shards matched the manifest — the manifest may not belong to this shard set.: %w: %w",
-				have, m.N, tf, ErrStaleManifest)
+			return fmt.Errorf("%d of %d shards matched the manifest — the manifest may not belong to this shard set.: %w: %w",
+				s.have, s.m.N, tf, ErrStaleManifest)
 		}
-		return nil, tf
+		return tf
 	}
+	return nil
+}
 
+func (s *shardSet) ciphertext() ([]byte, error) {
 	if testAtReconstruct != nil {
-		testAtReconstruct(shards)
+		testAtReconstruct(s.shards)
 	}
 
-	enc, err := erasure.New(m.K, m.N)
+	enc, err := erasure.New(s.m.K, s.m.N)
 	if err != nil {
 		return nil, err
 	}
-	if err := enc.Reconstruct(shards); err != nil {
+	if err := enc.Reconstruct(s.shards); err != nil {
 		return nil, err
 	}
 
 	var ct bytes.Buffer
-	if err := enc.Join(&ct, shards, m.CiphertextLen); err != nil {
+	if err := enc.Join(&ct, s.shards, s.m.CiphertextLen); err != nil {
 		return nil, err
 	}
 	if testAtJoin != nil {
-		testAtJoin(ct.Bytes(), m.CiphertextLen)
+		testAtJoin(ct.Bytes(), s.m.CiphertextLen)
 	}
-
-	n, err := decryptToFile(ctx, opts.OutPath, ct.Bytes(), id)
-	if err != nil {
-		return nil, err
-	}
-
-	if status != nil {
-		fmt.Fprintf(status, "restored %d bytes to %s\n", n, opts.OutPath)
-	}
-
-	return &RestoreReport{
-		OutPath:      opts.OutPath,
-		K:            m.K,
-		N:            m.N,
-		Usable:       have,
-		FailedIndex:  failed,
-		MissingIndex: missing,
-		PlaintextLen: n,
-	}, nil
+	return ct.Bytes(), nil
 }
 
 func loadShard(ctx context.Context, path string, stripeLen int64) (data []byte, missing, unusable bool, err error) {
