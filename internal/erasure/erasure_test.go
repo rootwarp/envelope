@@ -253,13 +253,16 @@ func TestSplitEncodesParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := e.enc.Encode(raw); err != nil {
+				t.Fatal(err)
+			}
 			shards, _, err := e.Split(ct)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for i := e.K(); i < e.N(); i++ {
-				if bytes.Equal(shards[i], raw[i]) {
-					t.Fatalf("parity shard %d matches library Split without Encode", i)
+				if !bytes.Equal(shards[i], raw[i]) {
+					t.Fatalf("parity shard %d differs from independently encoded parity", i)
 				}
 			}
 		})
