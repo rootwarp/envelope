@@ -7,6 +7,16 @@ plaintext.
 
 See [docs/usage.md](docs/usage.md) for the full usage guide.
 
+## Why Envelope is required
+
+A single encrypted file is lost if that file is lost. Copying the plaintext, or
+splitting first and encrypting each piece, can leak the secret.
+
+Envelope encrypts the file with age (X25519), then Reed–Solomon-codes the
+ciphertext into `n` shards. Any `k` of them restore it. Shards are ciphertext,
+so a missing subset does not contain plaintext. The identity decrypts; `(k, n)`
+is how many shards can be missing.
+
 v0 is local files only: `keygen`, `split`, `restore`, `verify`, `recipient`. Build with
 `go build -o envelope ./cmd/envelope`.
 
