@@ -44,6 +44,9 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err := ValidateKN(opts.K, opts.N); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	id, err := key.Load(opts.IdentityPath)
 	if err != nil {
@@ -86,10 +89,13 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		buf.Write(testInjectCiphertext())
 		ciphertextLen = int64(buf.Len())
 	} else {
-		ciphertextLen, err = crypt.Encrypt(&buf, in, id.Recipient())
+		ciphertextLen, err = crypt.Encrypt(&buf, ctxReader(ctx, in), id.Recipient())
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+		return nil, err
 	}
 	if testAtCiphertext != nil {
 		testAtCiphertext(buf.Bytes())
@@ -113,6 +119,12 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 
 	digests := make([][]byte, opts.N)
 	for i, shard := range shards {
+		if testBeforeShardWrite != nil {
+			testBeforeShardWrite(i)
+		}
+		if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+			return nil, err
+		}
 		d, err := writeShard(opts.OutDir, i, shard)
 		if err != nil {
 			return nil, err
@@ -133,6 +145,9 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 
+	if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+		return nil, err
+	}
 	if err := syncDir(opts.OutDir); err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
 	}
@@ -182,6 +197,37 @@ var testAtCiphertext func([]byte)
 // testInjectCiphertext, when set, replaces crypt.Encrypt. Tests inject a
 // closeless age stream so Split records the short counted length.
 var testInjectCiphertext func() []byte
+
+// testBeforeShardWrite runs at the start of each shard write. Tests cancel ctx
+// after the first shard to prove incomplete output is removed.
+var testBeforeShardWrite func(i int)
+
+func abortCanceledSplit(ctx context.Context, outDir string) error {
+	if err := ctx.Err(); err != nil {
+		removeIncompleteSplit(outDir)
+		return err
+	}
+	return nil
+}
+
+func removeIncompleteSplit(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		switch name {
+		case "manifest.age", "manifest.age.tmp":
+			_ = os.Remove(filepath.Join(dir, name))
+			continue
+		}
+		var i int
+		if _, err := fmt.Sscanf(name, "shard-%d", &i); err == nil && name == shardFileName(i) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+}
 
 func shardFileName(i int) string {
 	return fmt.Sprintf("shard-%02d", i)

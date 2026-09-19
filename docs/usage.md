@@ -71,7 +71,8 @@ shards/                 0700
 `manifest.age` is written only after every shard is synced, via a temporary
 file that is renamed into place. A directory without it is an incomplete
 split — delete it and run again. `keygen` syncs the identity file and its
-directory before reporting success.
+directory before reporting success. Ctrl-C during split cancels before the
+commit marker is published and removes any shard files already written.
 
 ### Distribute the shards
 

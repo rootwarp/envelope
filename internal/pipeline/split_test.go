@@ -30,6 +30,45 @@ func TestSplitRefusesNonEmptyOutDir(t *testing.T) {
 	}
 }
 
+func TestSplitHonorsCanceledContext(t *testing.T) {
+	out := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Split(ctx, validOpts(t, out), io.Discard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "manifest.age")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("published manifest on canceled split")
+	}
+}
+
+func TestSplitCancelDuringShardWriteRemovesOutput(t *testing.T) {
+	out := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	testBeforeShardWrite = func(i int) {
+		if i == 1 {
+			cancel()
+		}
+	}
+	t.Cleanup(func() { testBeforeShardWrite = nil })
+
+	_, err := Split(ctx, validOpts(t, out), io.Discard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "manifest.age" || name == "manifest.age.tmp" || strings.HasPrefix(name, "shard-") {
+			t.Fatalf("incomplete split left %s", name)
+		}
+	}
+}
+
 func TestSplitCreatesMissingOutDir(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "out")
 	rep, err := Split(context.Background(), validOpts(t, out), io.Discard)
