@@ -101,10 +101,21 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sta
 	multi := len(dirs) > 1
 	dir := dirs[0].given
 
-	manPath := filepath.Join(dir, "manifest.age")
-	blob, err := readManifestBlob(manPath)
-	if err != nil {
-		return nil, err
+	// Blobs are read BEFORE key.Load so ErrNoManifest and the manifest read
+	// errors keep their Phase 1 precedence over an unloadable identity.
+	cands, searched := gatherManifests(dirs)
+	if len(cands) == 0 {
+		return nil, noManifestErr(multi, searched)
+	}
+	allRead := false
+	for _, c := range cands {
+		if c.err == nil {
+			allRead = true
+			break
+		}
+	}
+	if !allRead {
+		return nil, cands[0].err
 	}
 
 	id, err := key.Load(identityPath)
@@ -124,13 +135,9 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sta
 		}
 	}()
 
-	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	m, err := chooseManifest(cands, macKey, id, identityPath, multi, status)
 	if err != nil {
-		path := manPath
-		if errors.Is(err, crypt.ErrWrongIdentity) {
-			path = identityPath
-		}
-		return nil, fmt.Errorf("%w: %s", err, path)
+		return nil, err
 	}
 
 	// Positional: compacting survivors makes ReconstructData and Join both
@@ -224,6 +231,9 @@ func (s *shardSet) ciphertext() ([]byte, error) {
 }
 
 func loadShard(ctx context.Context, path string, stripeLen int64) (data []byte, missing, unusable bool, err error) {
+	if testAtLoadShard != nil {
+		testAtLoadShard(path)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, false, err
 	}
@@ -375,6 +385,10 @@ func (c *contextReader) Read(p []byte) (int, error) {
 	}
 	return c.r.Read(p)
 }
+
+// testAtLoadShard runs at the start of loadShard. Tests assert a conflicting
+// pair returns before any shard path is opened.
+var testAtLoadShard func(path string)
 
 // testAtReconstruct runs at the Reconstruct call site (after the survivor
 // count, before reconstruction). Tests assert len(shards)==n and index placement.
