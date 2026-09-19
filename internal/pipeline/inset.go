@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/erasure"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
@@ -155,4 +157,87 @@ func noManifestErr(multi bool, searched []string) error {
 		return fmt.Errorf("%w: %s", ErrNoManifest, searched[0])
 	}
 	return fmt.Errorf("%w: searched %s", ErrNoManifest, strings.Join(searched, ", "))
+}
+
+// selectShards is the single selection pass of FR-MD-04. scanAll makes verify
+// examine every copy of every slot; restore stops at the first usable one.
+//
+// Reporting keeps Phase 1's two-phase ORDER — every "unusable" line, then every
+// "failed digest" line — so a single-directory run is byte-identical.
+func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanAll bool, multi bool, status io.Writer) (shards [][]byte, failed, missing []int, err error) {
+	shards = make([][]byte, m.N)
+	type reject struct {
+		index int
+		path  string
+	}
+	var unusableLines, digestLines []reject
+	// slotReason: 0 none, 1 unusable first, 2 digest first
+	slotReason := make([]int, m.N)
+
+	for i := 0; i < m.N; i++ {
+		present := false
+		for _, d := range dirs {
+			if shards[i] != nil && !scanAll {
+				break
+			}
+			p := filepath.Join(d.given, shardFileName(i))
+			b, miss, unusable, rerr := loadShard(ctx, p, m.StripeLen)
+			if rerr != nil {
+				return nil, nil, nil, rerr
+			}
+			if miss {
+				continue
+			}
+			present = true
+			if unusable {
+				unusableLines = append(unusableLines, reject{i, p})
+				if slotReason[i] == 0 {
+					slotReason[i] = 1
+				}
+				continue
+			}
+			if !bytes.Equal(erasure.Digest(b), m.Digests[i]) {
+				digestLines = append(digestLines, reject{i, p})
+				if slotReason[i] == 0 {
+					slotReason[i] = 2
+				}
+				continue
+			}
+			if shards[i] == nil {
+				shards[i] = b
+			}
+		}
+		if shards[i] == nil && !present {
+			missing = append(missing, i)
+		}
+	}
+
+	emit := func(rs []reject, form string) {
+		for _, r := range rs {
+			if status == nil {
+				continue
+			}
+			if multi {
+				fmt.Fprintf(status, form+": %s\n", r.index, r.path)
+			} else {
+				fmt.Fprintf(status, form+"\n", r.index)
+			}
+		}
+	}
+	emit(unusableLines, "unusable shard at index %d")
+	// Two loops: FailedIndex is grouped by reason (every unusable slot, then
+	// every digest slot), matching Phase 1 stderr order. Merging them into
+	// one index-order loop would change single-in FailedIndex and stderr (I3).
+	for i := 0; i < m.N; i++ {
+		if shards[i] == nil && slotReason[i] == 1 {
+			failed = append(failed, i)
+		}
+	}
+	emit(digestLines, "failed digest at index %d")
+	for i := 0; i < m.N; i++ {
+		if shards[i] == nil && slotReason[i] == 2 {
+			failed = append(failed, i)
+		}
+	}
+	return shards, failed, missing, nil
 }

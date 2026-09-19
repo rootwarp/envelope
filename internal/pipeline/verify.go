@@ -80,7 +80,7 @@ type VerifyReport struct {
 var ErrDamaged = errors.New("shard set is damaged: at least one shard failed its digest")
 
 func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyReport, error) {
-	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDirs, status)
+	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDirs, true, status)
 	if err != nil {
 		return nil, err
 	}

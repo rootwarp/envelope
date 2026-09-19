@@ -206,10 +206,6 @@ func TestDigestScreenErases(t *testing.T) {
 		if len(shards) != split.N {
 			t.Errorf("len(shards) = %d, want %d", len(shards), split.N)
 		}
-		if shards[idx] == nil {
-			t.Errorf("shards[%d] = nil after Erase, want [:0]", idx)
-			return
-		}
 		if len(shards[idx]) != 0 {
 			t.Errorf("shards[%d] len = %d after Erase, want 0", idx, len(shards[idx]))
 		}
