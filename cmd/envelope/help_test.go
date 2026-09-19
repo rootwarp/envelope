@@ -200,3 +200,80 @@ func commandHelp(t *testing.T, args []string) string {
 	}
 	return stdout.String()
 }
+
+// FR-P2-10
+func TestUsageErrorNames(t *testing.T) {
+	splitKN := []string{"split", "-identity", "id", "-in", "in.bin", "-out", "shards"}
+	tests := []struct {
+		name     string
+		args     []string
+		named    []string
+		contract string
+	}{
+		{name: "split", args: []string{"split"}, named: []string{`"identity, in, out"`}, contract: usageSplit},
+		{name: "keygen -bogus", args: []string{"keygen", "-bogus"}, named: []string{"-bogus"}, contract: usageKeygen},
+		{name: "split -k abc", args: append(append([]string{}, splitKN...), "-k", "abc"), named: []string{"-k"}, contract: usageSplit},
+		{name: "split -k 0", args: append(append([]string{}, splitKN...), "-k", "0"), named: []string{"k must be at least 1"}, contract: usageSplit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(tt.args, &stdout, &stderr)
+			out, errStr := stdout.String(), stderr.String()
+			if code != exitUsage {
+				t.Errorf("exit=%d want %d\nstdout=%q\nstderr=%q", code, exitUsage, out, errStr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout has %d bytes, want 0: %q", stdout.Len(), out)
+			}
+			reason, after, ok := strings.Cut(errStr, "\n")
+			if !ok {
+				t.Fatalf("stderr missing newline: %q", errStr)
+			}
+			for _, s := range tt.named {
+				if !strings.Contains(reason, s) {
+					t.Errorf("reason %q does not name %q", reason, s)
+				}
+			}
+			want := strings.TrimSuffix(tt.contract, "\n") + "\n"
+			if after != want {
+				t.Errorf("after reason = %q, want contract %q", after, want)
+			}
+		})
+	}
+}
+
+// FR-P2-10
+func TestSuggestion(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		mean string
+	}{
+		{name: "splt", args: []string{"splt"}, mean: "split"},
+		{name: "restor", args: []string{"restor"}, mean: "restore"},
+		{name: "keygn", args: []string{"keygn"}, mean: "keygen"},
+		{name: "xyzzy", args: []string{"xyzzy"}},
+		{name: "hlep", args: []string{"hlep"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(tt.args, &stdout, &stderr)
+			out, errStr := stdout.String(), stderr.String()
+			if code != exitUsage {
+				t.Errorf("exit=%d want %d\nstdout=%q\nstderr=%q", code, exitUsage, out, errStr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout has %d bytes, want 0: %q", stdout.Len(), out)
+			}
+			want := usageAll
+			if tt.mean != "" {
+				want = "did you mean \"" + tt.mean + "\"?\n" + usageAll
+			}
+			if errStr != want {
+				t.Errorf("stderr = %q, want exactly %q", errStr, want)
+			}
+		})
+	}
+}

@@ -123,7 +123,23 @@ func (a *app) noArgs(contract string, run cli.ActionFunc) cli.ActionFunc {
 	}
 }
 
-func (a *app) rootAction(context.Context, *cli.Command) error {
+func (a *app) rootAction(_ context.Context, c *cli.Command) error {
+	if c.NArg() == 0 {
+		return usageFail(a.stderr, usageAll, nil)
+	}
+	var names []string
+	for _, cmd := range c.Root().VisibleCommands() {
+		for _, name := range cmd.Names() {
+			if name == "help" || name == "h" {
+				continue // AD-5: never suggest help
+			}
+			names = append(names, name)
+		}
+	}
+	s := suggest(c.Args().First(), names)
+	if s != "" {
+		return usageFail(a.stderr, usageAll, fmt.Errorf("did you mean %q?", s))
+	}
 	return usageFail(a.stderr, usageAll, nil)
 }
 

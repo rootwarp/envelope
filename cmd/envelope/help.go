@@ -25,3 +25,43 @@ func (a *app) helpCommand() *cli.Command {
 		},
 	}
 }
+
+func suggest(token string, names []string) string {
+	best, bestDist := "", 3
+	for _, name := range names {
+		if d := levenshtein(token, name); d < bestDist {
+			best, bestDist = name, d
+		}
+	}
+	if bestDist > 2 {
+		return ""
+	}
+	return best
+}
+
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[lb]
+}
