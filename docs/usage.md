@@ -139,18 +139,43 @@ envelope restore -identity identity.txt -in shards/ -out restored.bin
 cmp secret.bin restored.bin && echo identical
 ```
 
+## Help
+
+```sh
+envelope help
+envelope help split
+envelope split -h
+```
+
+`-h`, `-help` and `--help` are equivalent. `envelope help` matches root `-h`;
+`envelope help split` matches `split -h`. Help goes to stdout and exits 0.
+
+## Shell completion
+
+```sh
+eval "$(envelope completion bash)"
+source <(envelope completion zsh)
+envelope completion fish > ~/.config/fish/completions/envelope.fish
+```
+
+`envelope completion bash`, `zsh` or `fish` writes a completion script to
+stdout and exits 0. On macOS bash 3.2, `eval` is required because
+`source <(envelope completion bash)` (the form `envelope help completion`
+prints) exits 0 without enabling completion. `pwsh` is also emitted; it is
+not part of the contract.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Success; explicit help (`-h`, `-help`, `--help`); `-version` |
+| 0 | Success; explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version` |
 | 1 | Operation failed; the reason is on stderr |
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
-stdout carries only what the operator asked a command to produce: version info
-and help text. stderr carries status, diagnostics, and errors. Neither stream
-ever carries payload or key material, and neither echoes a positional
-argument's value.
+stdout carries only what the operator asked a command to produce: version info,
+help text, and a completion script. stderr carries status, diagnostics, and
+errors. Neither stream ever carries payload or key material, and neither echoes
+a positional argument's value.
 
 If `URFAVE_CLI_TRACING=on` is set when the process starts, the library writes
 trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
@@ -175,5 +200,9 @@ source.
 | `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |
 | `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
 | `failed to decrypt and authenticate payload chunk, file may be corrupted or tampered with: …/manifest.age` | `manifest.age` is damaged or was modified | Use another copy of the manifest |
+| `Required flag(s) "…" not set` | A required flag is missing | Pass every flag listed in that command's help |
+| `flag provided but not defined: -X` | Unknown flag | Drop it; see that command's help for the flags it accepts |
+| `unexpected positional argument` | Extra argument after the flags | Remove it |
+| `did you mean "…"?` | Command name is close to a known command | Use the suggested command |
 
 A failed restore never leaves a partial output file behind.

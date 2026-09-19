@@ -76,6 +76,9 @@ mode checks Envelope makes.
 envelope keygen  -out identity.txt
 envelope split   -identity identity.txt -in secret.bin -out shards/ [-k 3] [-n 5]
 envelope restore -identity identity.txt -in shards/ -out secret.bin
+envelope help [command]
+envelope completion bash|zsh|fish
+envelope -version
 ```
 
 `envelope <command> -h` prints help.
