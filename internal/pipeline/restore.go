@@ -201,7 +201,7 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Ident
 
 	dst := io.Writer(f)
 	if testWrapDst != nil {
-		dst = testWrapDst(f)
+		dst = testWrapDst(ctx, f)
 	}
 	n, err = crypt.Decrypt(dst, ctxReader(ctx, bytes.NewReader(ct)), id.AgeIdentity())
 	if err != nil {
@@ -270,8 +270,9 @@ var testAtReconstruct func(shards [][]byte)
 var testAtJoin func(ct []byte, outSize int64)
 
 // testWrapDst wraps the decrypt destination. Tests inject a mid-copy error or
-// cancel the context after the first plaintext write.
-var testWrapDst func(io.Writer) io.Writer
+// cancel the context after the first plaintext write, and the signal-test
+// build parks here.
+var testWrapDst func(context.Context, io.Writer) io.Writer
 
 // testRename replaces os.Rename. Tests inject a rename failure without setting
 // committed.

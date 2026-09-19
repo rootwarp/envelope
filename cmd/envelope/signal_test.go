@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func testSignalMidRestore(t *testing.T, sig os.Signal) {
 	writeOpaque(t, in, 1<<20)
 	mustRun(t, "split", "-identity", id, "-in", in, "-out", shards)
 
-	bin := buildEnvelope(t)
+	bin := buildEnvelope(t, "envelope_signaltest")
 	cmd := exec.Command(bin, "restore", "-identity", id, "-in", shards, "-out", out)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -74,6 +75,9 @@ func testSignalMidRestore(t *testing.T, sig os.Signal) {
 		if err == nil {
 			t.Fatalf("exit 0, want non-zero\nstderr: %s", stderr.String())
 		}
+		if !bytes.Contains(stderr.Bytes(), []byte("context canceled")) {
+			t.Fatalf("stderr missing %q\nstderr: %s", "context canceled", stderr.String())
+		}
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
 		t.Fatalf("timed out waiting for exit after %v\nstderr: %s", sig, stderr.String())
@@ -83,10 +87,15 @@ func testSignalMidRestore(t *testing.T, sig os.Signal) {
 	assertAbsent(t, out)
 }
 
-func buildEnvelope(t *testing.T) string {
+func buildEnvelope(t *testing.T, tags ...string) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "envelope")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	args := []string{"build"}
+	if len(tags) > 0 {
+		args = append(args, "-tags", strings.Join(tags, ","))
+	}
+	args = append(args, "-o", bin, ".")
+	cmd := exec.Command("go", args...)
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller")

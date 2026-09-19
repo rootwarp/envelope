@@ -305,7 +305,7 @@ func TestRestoreDestinationMode(t *testing.T) {
 
 func TestMidCopyErrorLeavesNothing(t *testing.T) {
 	restore, _ := splitFixture(t)
-	testWrapDst = func(w io.Writer) io.Writer {
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
 	t.Cleanup(func() { testWrapDst = nil })
@@ -327,7 +327,7 @@ func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testWrapDst = func(w io.Writer) io.Writer {
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
 	t.Cleanup(func() { testWrapDst = nil })
@@ -347,7 +347,7 @@ func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
 func TestCleanupFailureJoinsErrors(t *testing.T) {
 	restore, _ := splitFixture(t)
 	partial := restore.OutPath + ".partial"
-	testWrapDst = func(w io.Writer) io.Writer {
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
 	testRemove = func(string) error { return errInjectedRemove }
@@ -372,7 +372,7 @@ func TestContextCancelMidCopy(t *testing.T) {
 	restore, _, _ := splitSized(t, 1<<20)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	testWrapDst = func(w io.Writer) io.Writer {
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &cancelOnWrite{w: w, cancel: cancel}
 	}
 	t.Cleanup(func() { testWrapDst = nil })

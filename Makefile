@@ -1,5 +1,5 @@
 # Pins match .github/workflows/ci.yml (FR-29). Do not float tool tags.
-.PHONY: build test race lint vuln vet ci fmt clean run tidy
+.PHONY: build test race lint vuln vet ci fmt clean run tidy sigstress
 
 APP_NAME := envelope
 BUILD_DIR := bin
@@ -25,6 +25,11 @@ test:
 
 race:
 	go test -count=1 -race ./...
+
+# Never run the suite with -tags envelope_signaltest: every in-process restore
+# would park until go test's own timeout.
+sigstress:
+	go test -count=20 -race -run 'SIG' ./cmd/envelope
 
 vet:
 	go vet ./...
