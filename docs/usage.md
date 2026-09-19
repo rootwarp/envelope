@@ -126,6 +126,17 @@ not a restore failure.
 Restore to local storage. On macOS network mounts (SMB), `fsync` can silently
 fall back to a weaker call.
 
+## Print the recipient
+
+```sh
+envelope recipient -identity identity.txt > identity.pub
+```
+
+Prints the public `age1` recipient of `-identity`, one line, to stdout. Use it
+to label which identity owns a shard set, or to check the identity against
+other age tools. It never prints the secret key. The identity file is not
+modified.
+
 ## Full example
 
 ```sh
@@ -168,14 +179,14 @@ not part of the contract.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success; explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version` |
+| 0 | Success; explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version`; `recipient` |
 | 1 | Operation failed; the reason is on stderr |
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
 stdout carries only what the operator asked a command to produce: version info,
-help text, and a completion script. stderr carries status, diagnostics, and
-errors. Neither stream ever carries payload or key material, and neither echoes
-a positional argument's value.
+help text, a completion script, and the recipient string. stderr carries status,
+diagnostics, and errors. Neither stream ever carries payload or key material,
+and neither echoes a positional argument's value.
 
 If `URFAVE_CLI_TRACING=on` is set when the process starts, the library writes
 trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
