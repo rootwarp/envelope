@@ -161,10 +161,23 @@ fall back to a weaker call.
 envelope verify -identity identity.txt -in shards/
 ```
 
+`-in` may be repeated. Directories are searched in the order given; the first
+usable copy of each shard wins. A `manifest.age` is needed in at least one of
+them:
+
+```sh
+envelope verify -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c
+```
+
+`restore` stops at the first usable copy of each shard, so checking every
+stored copy is what `verify` is for. Over slow removable media that means
+reading up to `d ×` the data — by design, and the price of the question it
+answers.
+
 | Flag | Required | Meaning |
 |---|---|---|
 | `-identity` | yes | The identity used for `split` |
-| `-in` | yes | Directory holding `manifest.age` and the shards |
+| `-in` | yes | Directory of shards; repeatable. A manifest is needed in at least one |
 
 The identity is required because the manifest is encrypted. Verify writes
 nothing: `-in` is not modified, it works on read-only media, and it decrypts
@@ -196,7 +209,9 @@ Each shard is `ok`, `missing`, or `corrupt`. The payload line is
 | `damaged` | At least one shard corrupt, but the set still restores | 1 |
 | `unrestorable` | Fewer than `k` shards ok, or the payload failed | 1 |
 
-`healthy` and `degraded` print nothing on stderr. `damaged` names the failing
+With one `-in`, `healthy` and `degraded` print nothing on stderr. With two or
+more, `verify` names every rejected copy the walk reached — a rotten redundant
+copy is visible here and invisible to `restore`. `damaged` names the failing
 indices on stderr, then `shard set is damaged: at least one shard failed its
 digest`. A manifest or identity failure prints nothing on stdout and the same
 message restore would.

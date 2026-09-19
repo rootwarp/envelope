@@ -44,6 +44,7 @@ Examples:
 healthy and degraded exit 0; damaged and unrestorable exit 1 with the report still on stdout.
 The identity is required because the manifest is encrypted. -in is not modified.
 -in may be repeated. Directories are searched in the order given; the first usable copy of each shard wins. A manifest is needed in at least one of them.
+restore stops at the first usable copy of each shard, so checking every stored copy is what verify is for.
 
 Examples:
   envelope verify -identity identity.txt -in shards/

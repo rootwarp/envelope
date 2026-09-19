@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/urfave/cli/v3"
 )
@@ -510,6 +511,112 @@ func TestRestoreHelpDescribesRepeatableIn(t *testing.T) {
 	}
 }
 
+// FR-MD-09: verify -h carries the repeatable-in prose plus the scan-depth sentence.
+func TestVerifyHelpDescribesScanDepth(t *testing.T) {
+	help := commandHelp(t, []string{"verify", "-h"})
+	if !strings.Contains(help, "repeat") && !strings.Contains(help, "repeated") {
+		t.Error("verify -h missing repeat/repeated")
+	}
+	if !strings.Contains(help, "first usable copy") {
+		t.Error("verify -h missing first-usable-wins sentence")
+	}
+	if !strings.Contains(help, "-in /mnt/a -in /mnt/b -in /mnt/c") {
+		t.Error("verify -h missing three-directory example")
+	}
+	if !strings.Contains(help, "restore stops") {
+		t.Error("verify -h missing restore-stops sentence")
+	}
+	if !strings.Contains(help, "checking every stored copy is what verify is for") {
+		t.Error("verify -h missing verify-scans sentence")
+	}
+	if strings.Contains(strings.ToUpper(help), "AGE-SECRET-KEY-") {
+		t.Error("verify -h contains identity material")
+	}
+	for _, p := range []string{"/Users/", "/home/"} {
+		if strings.Contains(help, p) {
+			t.Errorf("verify -h contains %q", p)
+		}
+	}
+}
+
+// FR-MD-04 / ADR 0011: a later unreadable decoy is invisible to restore and named by verify.
+func TestScanDepthDiscriminator(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod 0000 does not deny root")
+	}
+	id, shards, _ := mustSplitFixture(t)
+	dirA := filepath.Join(t.TempDir(), "a")
+	dirB := filepath.Join(t.TempDir(), "b")
+	copyDirFiles(t, shards, dirA)
+	copyDirFiles(t, shards, dirB)
+	decoy := filepath.Join(dirB, "shard-02")
+	if err := os.Chmod(decoy, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(decoy, 0o644) })
+	if f, err := os.OpenFile(decoy, os.O_RDONLY, 0); err == nil {
+		f.Close()
+		t.Skip("process can still read chmod 0000 shard")
+	}
+
+	out := filepath.Join(t.TempDir(), "out.bin")
+	var rOut, rErr bytes.Buffer
+	rCode := run([]string{"restore", "-identity", id, "-in", dirA, "-in", dirB, "-out", out}, &rOut, &rErr)
+	if rCode != exitOK {
+		t.Fatalf("restore exit = %d, want %d\nstderr: %s", rCode, exitOK, rErr.String())
+	}
+	if strings.Contains(rErr.String(), decoy) {
+		t.Fatalf("restore mentioned decoy %s; it must not open a later copy\nstderr: %s", decoy, rErr.String())
+	}
+
+	var vOut, vErr bytes.Buffer
+	vCode := run([]string{"verify", "-identity", id, "-in", dirA, "-in", dirB}, &vOut, &vErr)
+	if vCode != exitOK {
+		t.Fatalf("verify exit = %d, want %d\nstderr: %s", vCode, exitOK, vErr.String())
+	}
+	if got := vOut.String(); got != wantHealthy32 {
+		t.Fatalf("verify stdout =\n%s\nwant\n%s", got, wantHealthy32)
+	}
+	wantLine := "unusable shard at index 2: " + decoy
+	if !strings.Contains(vErr.String(), wantLine) {
+		t.Fatalf("verify stderr %q missing %q", vErr.String(), wantLine)
+	}
+}
+
+// NFR-MD-3: neither command writes into -in, including a mixed-mode pair.
+func TestVerifyWritesNothingScattered(t *testing.T) {
+	id, shards, _ := mustSplitFixture(t)
+
+	t.Run("verify", func(t *testing.T) {
+		root, rw, ro := mixedModeDirs(t, shards)
+		before := snapshotTree(t, root)
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"verify", "-identity", id, "-in", rw, "-in", ro}, &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitOK, stderr.String())
+		}
+		if got := stdout.String(); got != wantHealthy32 {
+			t.Fatalf("stdout =\n%s\nwant\n%s", got, wantHealthy32)
+		}
+		assertTreeUnchanged(t, before, snapshotTree(t, root))
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		root, rw, ro := mixedModeDirs(t, shards)
+		out := filepath.Join(t.TempDir(), "out.bin")
+		before := snapshotTree(t, root)
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"restore", "-identity", id, "-in", rw, "-in", ro, "-out", out}, &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitOK, stderr.String())
+		}
+		if _, err := os.Stat(out); err != nil {
+			t.Fatalf("restore wrote no output: %v", err)
+		}
+		assertTreeUnchanged(t, before, snapshotTree(t, root))
+	})
+}
+
 func TestRepeatableInRejectsPositional(t *testing.T) {
 	id, shards, out := mustSplitFixture(t)
 	second := filepath.Join(t.TempDir(), "b")
@@ -612,4 +719,103 @@ func scatterCLI(t *testing.T, src string, d int) []string {
 		n++
 	}
 	return dirs
+}
+
+// mixedModeDirs is NFR-MD-3's fixture: one writable directory, one 0555 with 0444 files.
+func mixedModeDirs(t *testing.T, shards string) (root, rw, ro string) {
+	t.Helper()
+	root = t.TempDir()
+	rw = filepath.Join(root, "rw")
+	ro = filepath.Join(root, "ro")
+	copyDirFiles(t, shards, rw)
+	copyDirFiles(t, shards, ro)
+	t.Cleanup(func() {
+		_ = os.Chmod(ro, 0o700)
+		ents, err := os.ReadDir(ro)
+		if err != nil {
+			return
+		}
+		for _, e := range ents {
+			_ = os.Chmod(filepath.Join(ro, e.Name()), 0o644)
+		}
+	})
+	ents, err := os.ReadDir(ro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if err := os.Chmod(filepath.Join(ro, e.Name()), 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	return root, rw, ro
+}
+
+type treeEntry struct {
+	path string
+	size int64
+	mode os.FileMode
+	mod  time.Time
+}
+
+func snapshotTree(t *testing.T, root string) []treeEntry {
+	t.Helper()
+	var out []treeEntry
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		size := int64(0)
+		if info.Mode().IsRegular() {
+			size = info.Size()
+		}
+		out = append(out, treeEntry{
+			path: rel,
+			size: size,
+			mode: info.Mode(),
+			mod:  info.ModTime(),
+		})
+		if strings.HasSuffix(d.Name(), ".partial") {
+			t.Errorf("*.partial present: %s", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertTreeUnchanged(t *testing.T, before, after []treeEntry) {
+	t.Helper()
+	if len(before) != len(after) {
+		t.Fatalf("tree listing length %d -> %d\nbefore:\n%s\nafter:\n%s",
+			len(before), len(after), formatTree(before), formatTree(after))
+	}
+	for i := range before {
+		b, a := before[i], after[i]
+		if b.path != a.path || b.size != a.size || b.mode != a.mode || !b.mod.Equal(a.mod) {
+			t.Fatalf("tree changed at %d: %s size=%d mode=%s -> %s size=%d mode=%s",
+				i, b.path, b.size, b.mode, a.path, a.size, a.mode)
+		}
+	}
+}
+
+func formatTree(entries []treeEntry) string {
+	var b strings.Builder
+	for _, e := range entries {
+		fmt.Fprintf(&b, "%s size=%d mode=%s\n", e.path, e.size, e.mode)
+	}
+	return b.String()
 }
