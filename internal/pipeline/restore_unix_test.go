@@ -13,7 +13,7 @@ import (
 
 func TestRestoreFIFOShardIsUnusable(t *testing.T) {
 	restore, _, want := splitSized(t, 1<<20)
-	path := filepath.Join(restore.InDir, shardFileName(4))
+	path := filepath.Join(restore.InDirs[0], shardFileName(4))
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

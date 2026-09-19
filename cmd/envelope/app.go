@@ -93,7 +93,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				run: func(ctx context.Context, c *cli.Command) error {
 					_, err := pipeline.Restore(ctx, pipeline.RestoreOptions{
 						IdentityPath: c.String("identity"),
-						InDir:        c.String("in"),
+						InDirs:       []string{c.String("in")},
 						OutPath:      c.String("out"),
 					}, a.stderr)
 					return err

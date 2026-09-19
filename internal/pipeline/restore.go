@@ -18,7 +18,7 @@ import (
 
 type RestoreOptions struct {
 	IdentityPath string
-	InDir        string
+	InDirs       []string
 	OutPath      string
 }
 
@@ -43,7 +43,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDir, status)
+	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDirs, status)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +87,11 @@ type shardSet struct {
 	have    int
 }
 
-func openShardSet(ctx context.Context, identityPath, inDir string, status io.Writer) (*shardSet, error) {
-	manPath := filepath.Join(inDir, "manifest.age")
+func openShardSet(ctx context.Context, identityPath string, inDirs []string, status io.Writer) (*shardSet, error) {
+	if len(inDirs) == 0 {
+		return nil, errors.New("at least one -in directory is required")
+	}
+	manPath := filepath.Join(inDirs[0], "manifest.age")
 	blob, err := readManifestBlob(manPath)
 	if err != nil {
 		return nil, err
@@ -126,7 +129,7 @@ func openShardSet(ctx context.Context, identityPath, inDir string, status io.Wri
 	var missing []int
 	var failed []int
 	for i := 0; i < m.N; i++ {
-		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(inDir, shardFileName(i)), m.StripeLen)
+		b, miss, unusable, rerr := loadShard(ctx, filepath.Join(inDirs[0], shardFileName(i)), m.StripeLen)
 		if rerr != nil {
 			return nil, rerr
 		}
