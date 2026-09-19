@@ -13,9 +13,11 @@ file is as stealable as the secret it protects.
 ```sh
 go build -o envelope ./cmd/envelope
 ./envelope -version
+./envelope --help
 ```
 
 `-version` prints the Envelope build and the `age` and `reedsolomon` versions.
+`--help` prints help.
 
 ## The three things you keep
 
@@ -141,12 +143,19 @@ cmp secret.bin restored.bin && echo identical
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
+| 0 | Success; explicit help (`-h`, `-help`, `--help`); `-version` |
 | 1 | Operation failed; the reason is on stderr |
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
-stdout is used only by `-version`. Status lines and errors go to stderr, and no
-command ever prints file contents or key material.
+stdout carries only what the operator asked a command to produce: version info
+and help text. stderr carries status, diagnostics, and errors. Neither stream
+ever carries payload or key material, and neither echoes a positional
+argument's value.
+
+If `URFAVE_CLI_TRACING=on` is set when the process starts, the library writes
+trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
+key material. It is a library debug switch, not an Envelope configuration
+source.
 
 ## Troubleshooting
 
