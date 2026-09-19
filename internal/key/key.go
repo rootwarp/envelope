@@ -9,7 +9,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"filippo.io/age"
 
@@ -54,12 +56,16 @@ func Create(path string) (*Identity, error) {
 		return nil, err
 	}
 	_, werr := io.WriteString(f, id.age.String()+"\n")
-	cerr := f.Close()
 	if werr != nil {
+		f.Close()
 		return nil, werr
 	}
-	if cerr != nil {
-		return nil, cerr
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
 	}
 	// os.WriteFile/O_CREATE supply a mode only at creation, so writing over a
 	// stale world-readable identity.txt would leave it world-readable. O_EXCL
@@ -67,7 +73,23 @@ func Create(path string) (*Identity, error) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, err
 	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	return id, nil
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil &&
+		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		return err
+	}
+	return nil
 }
 
 // Load parses path with age.ParseIdentities and rejects anything that is not

@@ -68,8 +68,10 @@ shards/                 0700
   manifest.age          0644, written last
 ```
 
-`manifest.age` is written only after every shard is on disk, so a directory
-without it is an incomplete split — delete it and run again.
+`manifest.age` is written only after every shard is synced, via a temporary
+file that is renamed into place. A directory without it is an incomplete
+split — delete it and run again. `keygen` syncs the identity file and its
+directory before reporting success.
 
 ### Distribute the shards
 

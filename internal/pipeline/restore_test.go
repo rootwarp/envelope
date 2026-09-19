@@ -414,10 +414,9 @@ func TestSyncDirTolerantOfENOTSUP(t *testing.T) {
 }
 
 func TestSyncDirEIOFailsAfterCommit(t *testing.T) {
+	restore, _, want := splitSized(t, 4096)
 	testDirSync = func() error { return syscall.EIO }
 	t.Cleanup(func() { testDirSync = nil })
-
-	restore, _, want := splitSized(t, 4096)
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, ErrDirSync) {
 		t.Fatalf("errors.Is(., ErrDirSync) = false, err=%v", err)

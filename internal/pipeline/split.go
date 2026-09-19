@@ -65,7 +65,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if entries, err := os.ReadDir(opts.OutDir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrOutDirNotEmpty, opts.OutDir)
 	}
-	if err := os.MkdirAll(opts.OutDir, 0o700); err != nil {
+	if err := mkdirAllDurable(opts.OutDir, 0o700); err != nil {
 		return nil, err
 	}
 	// 0700 &^ umask is 0700 for every realistic umask; Chmod is belt, kept
@@ -133,15 +133,28 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 
+	if err := syncDir(opts.OutDir); err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
+	}
+
 	// Commit marker: a crash between the last shard and this write leaves
-	// unusable ciphertext, never a false success.
+	// unusable ciphertext, never a false success. The marker is published by
+	// rename after the tmp file is synced.
 	if testFailManifestWrite != nil {
 		if err := testFailManifestWrite(); err != nil {
 			return nil, err
 		}
 	}
-	if err := writeExclusive(filepath.Join(opts.OutDir, "manifest.age"), bytes.NewReader(sealed), nil); err != nil {
+	manPath := filepath.Join(opts.OutDir, "manifest.age")
+	tmpPath := manPath + ".tmp"
+	if err := writeExclusive(tmpPath, bytes.NewReader(sealed), nil); err != nil {
 		return nil, err
+	}
+	if err := os.Rename(tmpPath, manPath); err != nil {
+		return nil, err
+	}
+	if err := syncDir(opts.OutDir); err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
 	}
 
 	if status != nil {
@@ -194,15 +207,46 @@ func writeExclusive(path string, r io.Reader, extra io.Writer) error {
 		w = io.MultiWriter(f, extra)
 	}
 	_, copyErr := io.Copy(w, r)
-	closeErr := f.Close()
 	if copyErr != nil {
+		f.Close()
 		return copyErr
 	}
-	if closeErr != nil {
-		return closeErr
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
 	}
 	// 0644 &^ umask degrades under umask 0027/0077; Chmod is the call that fires.
 	return os.Chmod(path, 0o644)
+}
+
+func mkdirAllDurable(path string, perm os.FileMode) error {
+	path = filepath.Clean(path)
+	if path == "" || path == "." {
+		return nil
+	}
+	st, err := os.Stat(path)
+	if err == nil {
+		if st.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("mkdir %s: not a directory", path)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	parent := filepath.Dir(path)
+	if parent != path {
+		if err := mkdirAllDurable(parent, perm); err != nil {
+			return err
+		}
+	}
+	if err := os.Mkdir(path, perm); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return syncDir(parent)
 }
 
 var (
