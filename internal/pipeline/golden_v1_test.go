@@ -115,7 +115,7 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := manifest.Open(blob, mac, id.AgeIdentity())
+	m, err := manifest.Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
 	}

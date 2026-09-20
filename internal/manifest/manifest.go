@@ -1,4 +1,5 @@
-// Package manifest holds the v1 decoded body and the hand-built binary MAC input.
+// Package manifest is a pure format package: fields, macInput, HMAC,
+// version dispatch, and no internal imports (D4).
 package manifest
 
 import (
@@ -7,11 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-
-	"filippo.io/age"
-
-	"github.com/rootwarp/envelope/internal/crypt"
-	"github.com/rootwarp/envelope/internal/key"
 )
 
 const Version uint32 = 1
@@ -25,12 +21,31 @@ const (
 // is in this struct and in macInput; nothing else may be read.
 type Manifest struct {
 	Version       uint32   `json:"version"`
+	MACSource     uint32   `json:"mac_source,omitempty"`
+	MACKeyID      []byte   `json:"mac_key_id,omitempty"`
 	K             int      `json:"k"`
 	N             int      `json:"n"`
 	CiphertextLen int64    `json:"ciphertext_len"`
 	StripeLen     int64    `json:"stripe_len"`
 	Digests       [][]byte `json:"digests"` // each exactly 32 bytes; [][]byte, never [][32]byte
 	MAC           []byte   `json:"mac"`     // 32 bytes; NOT part of macInput
+}
+
+// MACKeySource resolves the HMAC key a manifest names. KeyIDFor is card-free
+// and is consulted first; KeyFor may start a plugin process.
+type MACKeySource interface {
+	KeyIDFor(version, macSource uint32) ([]byte, error)
+	KeyFor(version, macSource uint32) ([]byte, error)
+}
+
+// Opener decrypts a manifest blob.
+type Opener interface {
+	DecryptBytes(blob []byte) ([]byte, error)
+}
+
+// Sealer encrypts a manifest body.
+type Sealer interface {
+	EncryptBytes(plaintext []byte) ([]byte, error)
 }
 
 // StripeLen is ceil(ciphertextLen / k). Split computes it; Open re-derives
@@ -46,8 +61,8 @@ var (
 	ErrInconsistent       = errors.New("authentic manifest is internally inconsistent")
 )
 
-// Seal computes the MAC, marshals the body, and age-encrypts it to r.
-func Seal(m *Manifest, macKey []byte, r age.Recipient) ([]byte, error) {
+// Seal computes the MAC, marshals the body, and encrypts it with s.
+func Seal(m *Manifest, macKey []byte, s Sealer) ([]byte, error) {
 	in, err := m.macInput()
 	if err != nil {
 		return nil, err
@@ -57,13 +72,13 @@ func Seal(m *Manifest, macKey []byte, r age.Recipient) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return crypt.EncryptBytes(body, r)
+	return s.EncryptBytes(body)
 }
 
-// Open age-decrypts blob and verifies it in architecture §5.3 order.
+// Open decrypts blob and verifies it in architecture §5.3 order.
 // It returns a *Manifest only when every check passed.
-func Open(blob, macKey []byte, id age.Identity) (*Manifest, error) {
-	body, err := crypt.DecryptBytes(blob, id)
+func Open(blob []byte, src MACKeySource, op Opener) (*Manifest, error) {
+	body, err := op.DecryptBytes(blob)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +97,11 @@ func Open(blob, macKey []byte, id age.Identity) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	macKey, err := src.KeyFor(m.Version, m.MACSource)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(macKey)
 	if !hmac.Equal(hmacSHA256(macKey, in), m.MAC) {
 		return nil, ErrMACMismatch
 	}
@@ -95,7 +115,7 @@ func hmacSHA256(macKey, in []byte) []byte {
 	mac := hmac.New(sha256.New, macKey)
 	mac.Write(in)
 	// HMAC-SHA256 tag width equals the HKDF-derived MAC key.
-	return mac.Sum(make([]byte, 0, key.MACKeyLen))
+	return mac.Sum(make([]byte, 0, MACLen))
 }
 
 func (m *Manifest) validateShape() error {
@@ -120,6 +140,9 @@ func (m *Manifest) validateShape() error {
 		}
 	}
 	if len(m.MAC) != MACLen {
+		return ErrMalformed
+	}
+	if m.MACSource != 0 || len(m.MACKeyID) != 0 {
 		return ErrMalformed
 	}
 	return nil

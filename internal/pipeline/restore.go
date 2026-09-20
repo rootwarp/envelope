@@ -134,7 +134,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 		}
 	}()
 
-	m, err := chooseManifest(cands, macKey, id, identityPath, multi, status)
+	m, err := chooseManifest(cands, id, identityPath, multi, status)
 	if err != nil {
 		return nil, err
 	}

@@ -148,6 +148,45 @@ func TestManifestMACKeyGoldenVector(t *testing.T) {
 	}
 }
 
+func TestIdentityMACKeySourceV1Only(t *testing.T) {
+	id, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(id.Zero)
+
+	kid, err := id.KeyIDFor(1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kid != nil {
+		t.Fatal("KeyIDFor(1, 0) returned a key id")
+	}
+
+	got, err := id.KeyFor(1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(got)
+	want, err := id.ManifestMACKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(want)
+	if !hmac.Equal(got, want) {
+		t.Fatal("KeyFor(1, 0) disagrees with ManifestMACKey")
+	}
+
+	for _, pair := range [][2]uint32{{2, 0}, {1, 1}, {2, 1}} {
+		if _, err := id.KeyIDFor(pair[0], pair[1]); !errors.Is(err, errMACSourceUnsupported) {
+			t.Fatalf("KeyIDFor(%d, %d): errors.Is(., errMACSourceUnsupported) = false", pair[0], pair[1])
+		}
+		if _, err := id.KeyFor(pair[0], pair[1]); !errors.Is(err, errMACSourceUnsupported) {
+			t.Fatalf("KeyFor(%d, %d): errors.Is(., errMACSourceUnsupported) = false", pair[0], pair[1])
+		}
+	}
+}
+
 func TestScalarRoundTrip(t *testing.T) {
 	src, err := age.GenerateX25519Identity()
 	if err != nil {

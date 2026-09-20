@@ -140,7 +140,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		StripeLen:     stripeLen,
 		Digests:       digests,
 		MAC:           make([]byte, manifest.MACLen), // Seal validates shape before filling the tag
-	}, macKey, id.Recipient())
+	}, macKey, id)
 	if err != nil {
 		return nil, err
 	}

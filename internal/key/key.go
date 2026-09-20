@@ -15,6 +15,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/key/bech32"
 )
 
@@ -125,6 +126,28 @@ func (id *Identity) Recipient() age.Recipient {
 	return id.age.Recipient()
 }
 
+func (id *Identity) DecryptBytes(blob []byte) ([]byte, error) {
+	return crypt.DecryptBytes(blob, id.AgeIdentity())
+}
+
+func (id *Identity) EncryptBytes(plaintext []byte) ([]byte, error) {
+	return crypt.EncryptBytes(plaintext, id.Recipient())
+}
+
+func (id *Identity) KeyIDFor(version, macSource uint32) ([]byte, error) {
+	if version != 1 || macSource != 0 {
+		return nil, errMACSourceUnsupported
+	}
+	return nil, nil
+}
+
+func (id *Identity) KeyFor(version, macSource uint32) ([]byte, error) {
+	if version != 1 || macSource != 0 {
+		return nil, errMACSourceUnsupported
+	}
+	return id.ManifestMACKey()
+}
+
 // ManifestMACKey returns a fresh 32-byte key. The caller owns its lifetime.
 func (id *Identity) ManifestMACKey() ([]byte, error) {
 	// FR-3: never sha256(identity.String()) — that hashes the Bech32 encoding, so a
@@ -146,6 +169,8 @@ var (
 	ErrInvalidIdentity   = errors.New("identity file is invalid")
 	ErrScalarLength      = errors.New("X25519 scalar must be 32 bytes")
 	ErrHRPMismatch       = errors.New("identity has an unexpected human-readable prefix")
+
+	errMACSourceUnsupported = errors.New("manifest MAC source is not supported")
 )
 
 func newIdentity(id *age.X25519Identity) (*Identity, error) {

@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
@@ -9,8 +10,6 @@ import (
 	"errors"
 	"strconv"
 	"testing"
-
-	"filippo.io/age"
 
 	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/key"
@@ -157,6 +156,8 @@ func TestValidateShape(t *testing.T) {
 		}},
 		{"negative CiphertextLen", func(m *Manifest) { m.CiphertextLen = -1 }},
 		{"negative StripeLen", func(m *Manifest) { m.StripeLen = -1 }},
+		{"MACSource!=0", func(m *Manifest) { m.MACSource = 1 }},
+		{"non-empty MACKeyID", func(m *Manifest) { m.MACKeyID = []byte{0x01} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,17 +240,37 @@ func shaped(k, n int) *Manifest {
 	return m
 }
 
+func TestV1JSONOmitsMACSourceFields(t *testing.T) {
+	body, err := json.Marshal(golden35())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte(`"mac_source"`)) {
+		t.Fatal(`marshalled v1 body contains "mac_source"`)
+	}
+	if bytes.Contains(body, []byte(`"mac_key_id"`)) {
+		t.Fatal(`marshalled v1 body contains "mac_key_id"`)
+	}
+	var m Manifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.MACSource != 0 || len(m.MACKeyID) != 0 {
+		t.Fatalf("round-trip MACSource=%d len(MACKeyID)=%d, want 0, 0", m.MACSource, len(m.MACKeyID))
+	}
+}
+
 func TestSealOpenRoundTrip(t *testing.T) {
-	macKey, id, r := testKey(t)
+	macKey, id := testKey(t)
 	want := golden35()
-	blob, err := Seal(want, macKey, r)
+	blob, err := Seal(want, macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(blob) == 0 {
 		t.Fatal("Seal returned empty blob")
 	}
-	got, err := Open(blob, macKey, id)
+	got, err := Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +282,7 @@ func TestOpenRejectsReorderedDigests(t *testing.T) {
 	blob := resealJSON(t, fx, func(m *Manifest) {
 		m.Digests[0], m.Digests[1] = m.Digests[1], m.Digests[0]
 	})
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrMACMismatch)
 }
 
@@ -272,17 +293,17 @@ func TestOpenRejectsAlteredDigestByte(t *testing.T) {
 		d[0] ^= 0xff
 		m.Digests[0] = d
 	})
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrMACMismatch)
 }
 
 func TestOpenRejectsForeignMACKey(t *testing.T) {
 	fx := sealedGolden(t)
-	foreign, _, _ := testKey(t)
+	foreign, other := testKey(t)
 	if hmac.Equal(foreign, fx.macKey) {
 		t.Fatal("foreign MAC key collided with sealed key")
 	}
-	got, err := Open(fx.blob, foreign, fx.id)
+	got, err := Open(fx.blob, other, fx.id)
 	assertOpenErr(t, got, err, ErrMACMismatch)
 }
 
@@ -292,7 +313,7 @@ func TestOpenRejectsDroppedDigestBeforeMAC(t *testing.T) {
 		blob := resealJSON(t, fx, func(m *Manifest) {
 			m.Digests = m.Digests[:len(m.Digests)-1]
 		})
-		got, err := Open(blob, fx.macKey, fx.id)
+		got, err := Open(blob, fx.id, fx.id)
 		assertOpenErr(t, got, err, ErrMalformed)
 	})
 	t.Run("drop digest and lower n", func(t *testing.T) {
@@ -301,20 +322,20 @@ func TestOpenRejectsDroppedDigestBeforeMAC(t *testing.T) {
 			m.Digests = m.Digests[:len(m.Digests)-1]
 			m.N = len(m.Digests)
 		})
-		got, err := Open(blob, fx.macKey, fx.id)
+		got, err := Open(blob, fx.id, fx.id)
 		assertOpenErr(t, got, err, ErrMACMismatch)
 	})
 }
 
 func TestOpenInconsistentIsNotMACMismatch(t *testing.T) {
-	macKey, id, r := testKey(t)
+	macKey, id := testKey(t)
 	m := golden35()
 	m.StripeLen++
-	blob, err := Seal(m, macKey, r)
+	blob, err := Seal(m, macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Open(blob, macKey, id)
+	got, err := Open(blob, id, id)
 	assertOpenErr(t, got, err, ErrInconsistent)
 }
 
@@ -323,14 +344,14 @@ func TestOpenRejectsVersionBump(t *testing.T) {
 	blob := resealJSON(t, fx, func(m *Manifest) {
 		m.Version = 2
 	})
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrUnsupportedVersion)
 }
 
 func TestOpenWrongIdentity(t *testing.T) {
 	fx := sealedGolden(t)
-	_, other, _ := testKey(t)
-	got, err := Open(fx.blob, fx.macKey, other)
+	_, other := testKey(t)
+	got, err := Open(fx.blob, fx.id, other)
 	assertOpenErr(t, got, err, crypt.ErrWrongIdentity)
 }
 
@@ -340,10 +361,10 @@ func TestOpenTruncatedBlob(t *testing.T) {
 		t.Fatalf("sealed blob length %d, want > 1", len(fx.blob))
 	}
 	truncated := fx.blob[:len(fx.blob)-1]
-	if _, err := crypt.DecryptBytes(truncated, fx.id); err == nil {
+	if _, err := fx.id.DecryptBytes(truncated); err == nil {
 		t.Fatal("DecryptBytes(truncated): err = nil, want step-1 failure")
 	}
-	got, err := Open(truncated, fx.macKey, fx.id)
+	got, err := Open(truncated, fx.id, fx.id)
 	if got != nil {
 		t.Fatal("Open returned a Manifest")
 	}
@@ -359,7 +380,7 @@ func TestOpenTruncatedBlob(t *testing.T) {
 
 func TestUnknownTopLevelKeyIsInert(t *testing.T) {
 	fx := sealedGolden(t)
-	want, err := Open(fx.blob, fx.macKey, fx.id)
+	want, err := Open(fx.blob, fx.id, fx.id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +397,7 @@ func TestUnknownTopLevelKeyIsInert(t *testing.T) {
 		return out
 	})
 
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,17 +407,17 @@ func TestUnknownTopLevelKeyIsInert(t *testing.T) {
 func TestDuplicateKeyFailsMAC(t *testing.T) {
 	// encoding/json keeps the last duplicate, so k=9 mismatches the MAC.
 	// Do not reject duplicates as malformed JSON.
-	macKey, id, r := testKey(t)
+	macKey, id := testKey(t)
 	m := shaped(3, 16)
 	m.CiphertextLen = 48
 	m.StripeLen = StripeLen(48, 3)
-	orig, err := Seal(m, macKey, r)
+	orig, err := Seal(m, macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fx := sealFix{blob: orig, macKey: macKey, id: id, r: r}
+	fx := sealFix{blob: orig, macKey: macKey, id: id}
 
-	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	body, err := fx.id.DecryptBytes(fx.blob)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,12 +429,12 @@ func TestDuplicateKeyFailsMAC(t *testing.T) {
 	if parsed.K != 9 {
 		t.Fatalf("k = %d, want 9 (last duplicate wins)", parsed.K)
 	}
-	blob, err := crypt.EncryptBytes(body, fx.r)
+	blob, err := fx.id.EncryptBytes(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrMACMismatch)
 }
 
@@ -443,7 +464,7 @@ func TestNegativeLengthsRejectedBeforeConversion(t *testing.T) {
 	fx := sealedGolden(t)
 	blob := resealJSON(t, fx, func(m *Manifest) { m.CiphertextLen = -1 })
 
-	body, err := crypt.DecryptBytes(blob, fx.id)
+	body, err := fx.id.DecryptBytes(blob)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,18 +486,17 @@ func TestNegativeLengthsRejectedBeforeConversion(t *testing.T) {
 		t.Fatalf("macInput: errors.Is(., ErrMalformed) = false")
 	}
 
-	got, err := Open(blob, fx.macKey, fx.id)
+	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrMalformed)
 }
 
 type sealFix struct {
 	blob   []byte
 	macKey []byte
-	id     age.Identity
-	r      age.Recipient
+	id     *key.Identity
 }
 
-func testKey(t *testing.T) (macKey []byte, id age.Identity, r age.Recipient) {
+func testKey(t *testing.T) (macKey []byte, id *key.Identity) {
 	t.Helper()
 	kid, err := key.Generate()
 	if err != nil {
@@ -486,25 +506,25 @@ func testKey(t *testing.T) (macKey []byte, id age.Identity, r age.Recipient) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(macKey) != key.MACKeyLen {
-		t.Fatalf("mac key len = %d, want %d", len(macKey), key.MACKeyLen)
+	if len(macKey) != MACLen {
+		t.Fatalf("mac key len = %d, want %d", len(macKey), MACLen)
 	}
-	return macKey, kid.AgeIdentity(), kid.Recipient()
+	return macKey, kid
 }
 
 func sealedGolden(t *testing.T) sealFix {
 	t.Helper()
-	macKey, id, r := testKey(t)
-	blob, err := Seal(golden35(), macKey, r)
+	macKey, id := testKey(t)
+	blob, err := Seal(golden35(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sealFix{blob: blob, macKey: macKey, id: id, r: r}
+	return sealFix{blob: blob, macKey: macKey, id: id}
 }
 
 func resealJSON(t *testing.T, fx sealFix, mut func(*Manifest)) []byte {
 	t.Helper()
-	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	body, err := fx.id.DecryptBytes(fx.blob)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +537,7 @@ func resealJSON(t *testing.T, fx sealFix, mut func(*Manifest)) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := crypt.EncryptBytes(raw, fx.r)
+	out, err := fx.id.EncryptBytes(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,12 +546,12 @@ func resealJSON(t *testing.T, fx sealFix, mut func(*Manifest)) []byte {
 
 func resealRaw(t *testing.T, fx sealFix, mut func([]byte) []byte) []byte {
 	t.Helper()
-	body, err := crypt.DecryptBytes(fx.blob, fx.id)
+	body, err := fx.id.DecryptBytes(fx.blob)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := mut(body)
-	out, err := crypt.EncryptBytes(raw, fx.r)
+	out, err := fx.id.EncryptBytes(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

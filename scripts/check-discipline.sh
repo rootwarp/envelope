@@ -3,7 +3,7 @@
 # D1: crypt and erasure never depend on each other (FR-20 AC).
 # D2: pipeline imports only key, crypt, erasure, manifest + stdlib.
 # D3: nothing under internal/ imports pipeline; cmd/envelope is its only importer.
-# D4: manifest never depends on erasure.
+# D4: manifest imports no internal package.
 # D5: internal/key/bech32 is imported by internal/key only.
 # D6: only cmd/envelope may import github.com/urfave/cli/v3.
 # D7: cmd/envelope imports only pipeline, urfave/cli/v3 + stdlib.
@@ -80,11 +80,17 @@ if pkg_exists ./internal/pipeline; then
 	done < <(go list -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/pipeline"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
-# D4: manifest imports key and crypt, never erasure (ADR-0004).
-if [ -d internal/manifest ]; then
-	if list_deps ./internal/manifest | grep -q 'internal/erasure'; then
-		fail "D4: manifest depends on erasure"
-	fi
+# D4: manifest imports no $mod/internal/... package at all (ADR-0004).
+if pkg_exists ./internal/manifest; then
+	while IFS= read -r dep; do
+		[ -n "$dep" ] || continue
+		case "$dep" in
+		"$mod/internal/manifest") continue ;;
+		"$mod/internal/"*)
+			fail "D4: manifest imports $dep (no internal package allowed)"
+			;;
+		esac
+	done < <(list_deps ./internal/manifest)
 fi
 
 # D5: internal/key/bech32 is imported by internal/key and nothing else.

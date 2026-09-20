@@ -613,15 +613,11 @@ func openSplitManifest(t *testing.T, opts SplitOptions) *manifest.Manifest {
 	if err != nil {
 		t.Fatal(err)
 	}
-	macKey, err := id.ManifestMACKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	blob, err := os.ReadFile(filepath.Join(opts.OutDir, "manifest.age"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	m, err := manifest.Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
 	}

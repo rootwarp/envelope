@@ -16,6 +16,14 @@ func TestDisciplinePasses(t *testing.T) {
 	}
 }
 
+func TestDisciplineD4(t *testing.T) {
+	root := scratchDiscipline(t)
+	writeFile(t, filepath.Join(root, "internal", "key", "key.go"), "package key\n")
+	writeFile(t, filepath.Join(root, "internal", "manifest", "manifest.go"),
+		"package manifest\n\nimport _ \"github.com/rootwarp/envelope/internal/key\"\n")
+	assertDisciplineRule(t, root, "D4")
+}
+
 func TestDisciplineD9(t *testing.T) {
 	root := scratchDiscipline(t)
 	writeFile(t, filepath.Join(root, "internal", "crypt", "crypt.go"), "package crypt\n")

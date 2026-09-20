@@ -195,11 +195,11 @@ func reseal(t *testing.T, identityPath, srcManifest, dstManifest string) {
 		t.Fatal(err)
 	}
 	defer clear(macKey)
-	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	m, err := manifest.Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := manifest.Seal(m, macKey, id.Recipient())
+	out, err := manifest.Seal(m, macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func openManifest(t *testing.T, identityPath, manPath string) (*key.Identity, []
 		id.Zero()
 		t.Fatal(err)
 	}
-	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	m, err := manifest.Open(blob, id, id)
 	if err != nil {
 		clear(macKey)
 		id.Zero()
@@ -298,7 +298,7 @@ func TestConflictingManifests(t *testing.T) {
 	}
 	m.Digests[0] = bytes.Clone(m.Digests[0])
 	m.Digests[0][0] ^= 0x01
-	altered, err := manifest.Seal(m, macKey, id.Recipient())
+	altered, err := manifest.Seal(m, macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}

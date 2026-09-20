@@ -651,16 +651,11 @@ func tamperManifestMAC(t *testing.T, identityPath, manPath string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(id.Zero)
-	macKey, err := id.ManifestMACKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { clear(macKey) })
 	blob, err := os.ReadFile(manPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := manifest.Open(blob, macKey, id.AgeIdentity())
+	m, err := manifest.Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
 	}
