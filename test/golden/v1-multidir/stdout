@@ -1,0 +1,9 @@
+manifest ok: k=3 n=5
+shard-00 ok
+shard-01 ok
+shard-02 ok
+shard-03 ok
+shard-04 ok
+usable 5 of 5, need 3
+payload ok: 4096 bytes
+result: healthy

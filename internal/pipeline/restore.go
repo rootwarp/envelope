@@ -140,6 +140,9 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	}
 	ok := false
 	defer func() {
+		if ObserveOpenInteractions != nil {
+			ObserveOpenInteractions(keys.Interactions())
+		}
 		if !ok {
 			keys.Zero()
 		}
@@ -156,7 +159,11 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 		defer clear(macKey)
 	}
 
-	m, err := chooseManifest(cands, keys, identitySource(keys, identityPaths), multi, status)
+	op := manifest.Opener(keys)
+	if testWrapManifestOpener != nil {
+		op = testWrapManifestOpener(op)
+	}
+	m, err := chooseManifest(groupCandidates(cands), keys, op, identitySource(keys, identityPaths), multi, status)
 	if err != nil {
 		return nil, err
 	}
@@ -375,6 +382,16 @@ func (c *contextReader) Read(p []byte) (int, error) {
 	}
 	return c.r.Read(p)
 }
+
+// ObserveOpenInteractions receives the identity-side Unwrap count after
+// openShardSet finishes, before Zero on a failed return. Tests assert that
+// identical copies cost one decrypt site and that a v1 representative
+// consults no pin.
+var ObserveOpenInteractions func(int)
+
+// testWrapManifestOpener wraps the opener chooseManifest uses. Tests count
+// decrypts of distinct blobs.
+var testWrapManifestOpener func(manifest.Opener) manifest.Opener
 
 // testAtLoadShard runs at the start of loadShard. Tests assert a conflicting
 // pair returns before any shard path is opened.

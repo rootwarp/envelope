@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,12 @@ import (
 
 	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/erasure"
-	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
 
 // ErrConflictingManifests is returned when two -in directories hold manifests
-// that both authenticate but describe different shard sets.
+// that both authenticate but disagree: same-version bodies that describe
+// different shard sets, or a mixed-version pair from different splits.
 var ErrConflictingManifests = errors.New("conflicting manifests")
 
 // inDir is one resolved -in directory. given is exactly what the operator
@@ -91,11 +92,57 @@ func gatherManifests(dirs []inDir) (cands []manifestCandidate, searched []string
 	return cands, searched
 }
 
+type manifestGroup struct {
+	rep   manifestCandidate // first candidate of the group, in -in order
+	paths []string          // every path whose blob was byte-identical, in -in order
+}
+
+// groupCandidates groups the candidates whose read succeeded by SHA-256 of the
+// already-read blob (not a re-read: that would be a TOCTOU the current code
+// does not have). Byte-identical blobs decrypt to identical bodies and
+// identical MACs, so opening one representative decides for the group.
+//
+// Three rules make the optimisation unobservable, and each is a bug if missed:
+//
+//  1. Dedup collapses decryptions, never diagnostics. The representative's
+//     outcome is replayed for every path in its group, in -in order, so the
+//     buffered stderr notes and firstErr stay byte-identical to opening every
+//     copy. That is what keeps a v1 multi-directory run byte-identical (I-11).
+//
+//  2. Only c.err == nil candidates may be grouped. An error candidate carries
+//     a nil or partial blob, and chooseManifest buffers one stderr note per
+//     error candidate. Grouping them would stop a three-USB-stick run naming
+//     the paths it names today. Error candidates pass through one group each.
+//
+//  3. Version dispatch and MAC-key resolution happen per representative,
+//     after decryption. A blob's version is unknown until it is decrypted, so
+//     resolving a key up front is forbidden — it is exactly what would break
+//     FR-YK-03's lazy KeyFor promise. A v1 representative in a mixed run is
+//     opened, and opening it consults no pin and costs no card.
+func groupCandidates(cands []manifestCandidate) []manifestGroup {
+	groups := make([]manifestGroup, 0, len(cands))
+	seen := make(map[[sha256.Size]byte]int, len(cands))
+	for _, c := range cands {
+		if c.err != nil {
+			groups = append(groups, manifestGroup{rep: c, paths: []string{c.path}})
+			continue
+		}
+		sum := sha256.Sum256(c.blob)
+		if i, ok := seen[sum]; ok {
+			groups[i].paths = append(groups[i].paths, c.path)
+			continue
+		}
+		seen[sum] = len(groups)
+		groups = append(groups, manifestGroup{rep: c, paths: []string{c.path}})
+	}
+	return groups
+}
+
 // chooseManifest applies FR-MD-03. Two authenticated manifests agree iff their
 // MACs are equal: both were verified against the same key, and macInput covers
 // exactly the fields that influence restore, so MAC equality is decoded-field
 // equality without comparing the randomized .age blobs.
-func chooseManifest(cands []manifestCandidate, keys *key.Set, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
+func chooseManifest(groups []manifestGroup, src manifest.MACKeySource, op manifest.Opener, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
 	var chosen *manifest.Manifest
 	var chosenPath string
 	var firstErr error
@@ -117,26 +164,36 @@ func chooseManifest(cands []manifestCandidate, keys *key.Set, identityPath strin
 		notes = append(notes, shown)
 	}
 
-	for _, c := range cands {
-		if c.err != nil {
+	for _, g := range groups {
+		if g.rep.err != nil {
 			// readManifestBlob already formatted a path-bearing error.
-			if firstErr == nil {
-				firstErr = c.err
+			// Replay per path so an error group still names every member;
+			// groupCandidates keeps error candidates one group each, so this
+			// is one note per failed read, as before.
+			for range g.paths {
+				if firstErr == nil {
+					firstErr = g.rep.err
+				}
+				notes = append(notes, g.rep.err)
 			}
-			notes = append(notes, c.err)
 			continue
 		}
-		m, err := manifest.Open(c.blob, keys, keys)
+		m, err := manifest.Open(g.rep.blob, src, op)
 		if err != nil {
-			noteFail(c, err)
+			for _, p := range g.paths {
+				noteFail(manifestCandidate{path: p, blob: g.rep.blob}, err)
+			}
 			continue
 		}
 		if chosen == nil {
-			chosen, chosenPath = m, c.path
+			chosen, chosenPath = m, g.rep.path
 			continue
 		}
 		if !bytes.Equal(chosen.MAC, m.MAC) {
-			return nil, fmt.Errorf("%w: %s and %s describe different shard sets", ErrConflictingManifests, chosenPath, c.path)
+			if chosen.Version != m.Version {
+				return nil, fmt.Errorf("%w: %s and %s: these directories hold manifests from different splits", ErrConflictingManifests, chosenPath, g.rep.path)
+			}
+			return nil, fmt.Errorf("%w: %s and %s describe different shard sets", ErrConflictingManifests, chosenPath, g.rep.path)
 		}
 	}
 	if chosen == nil {

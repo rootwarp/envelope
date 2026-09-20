@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -179,6 +180,68 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	if newM.Version != m.Version || newM.K != m.K || newM.N != m.N ||
 		newM.CiphertextLen != m.CiphertextLen || newM.StripeLen != m.StripeLen {
 		t.Fatal("re-split decoded v1 body disagrees with the committed fixture")
+	}
+}
+
+// I-11: a non-interactive v1 multi-directory run is byte-identical to 58ed8bd.
+// Capture produced by that binary over the committed v1 shard set copied to
+// a/ and c/ with b/manifest.age a directory — not a freshly computed expectation.
+func TestGoldenV1MultiDirCapture(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("committed capture uses Unix paths")
+	}
+	dir := goldenV1Dir(t)
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotGolden(t, dir)
+	t.Cleanup(func() { assertGoldenUnchanged(t, dir, before) })
+
+	idPath := materialiseGoldenIdentity(t, dir)
+	root := t.TempDir()
+	t.Chdir(root)
+	for _, name := range []string{"a", "c"} {
+		dst := filepath.Join(root, name)
+		if err := os.Mkdir(dst, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		copyShards(t, dir, dst, 5)
+		copyFile(t, filepath.Join(dir, "manifest.age"), filepath.Join(dst, "manifest.age"))
+	}
+	b := filepath.Join(root, "b")
+	if err := os.Mkdir(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyShards(t, dir, b, 5)
+	if err := os.Mkdir(filepath.Join(b, "manifest.age"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var status bytes.Buffer
+	vrep, err := Verify(context.Background(), VerifyOptions{
+		IdentityPaths: []string{idPath},
+		InDirs:        []string{"a", "b", "c"},
+	}, &status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotOut := formatVerifyReport(vrep)
+	gotErr := status.String()
+	capDir := filepath.Join(dir, "..", "v1-multidir")
+	wantOut, err := os.ReadFile(filepath.Join(capDir, "stdout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr, err := os.ReadFile(filepath.Join(capDir, "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotOut != string(wantOut) {
+		t.Fatalf("stdout:\n%s\nwant:\n%s", gotOut, wantOut)
+	}
+	if gotErr != string(wantErr) {
+		t.Fatalf("stderr:\n%s\nwant:\n%s", gotErr, wantErr)
 	}
 }
 

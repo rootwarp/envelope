@@ -175,6 +175,18 @@ func givenPaths(dirs []inDir) []string {
 	return out
 }
 
+// countingOpener is a sibling of reseal: tests assert decrypts == distinct
+// blobs by wrapping the production Opener rather than re-reading files.
+type countingOpener struct {
+	inner manifest.Opener
+	n     int
+}
+
+func (o *countingOpener) DecryptBytes(blob []byte) ([]byte, error) {
+	o.n++
+	return o.inner.DecryptBytes(blob)
+}
+
 // reseal decrypts a manifest and re-encrypts the SAME decoded content to the
 // same identity. age is randomized, so the blob differs byte-wise while every
 // decoded field — and therefore the MAC — is identical. This is the fixture
