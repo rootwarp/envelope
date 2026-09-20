@@ -95,7 +95,7 @@ func gatherManifests(dirs []inDir) (cands []manifestCandidate, searched []string
 // MACs are equal: both were verified against the same key, and macInput covers
 // exactly the fields that influence restore, so MAC equality is decoded-field
 // equality without comparing the randomized .age blobs.
-func chooseManifest(cands []manifestCandidate, id *key.Identity, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
+func chooseManifest(cands []manifestCandidate, keys *key.Set, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
 	var chosen *manifest.Manifest
 	var chosenPath string
 	var firstErr error
@@ -126,7 +126,7 @@ func chooseManifest(cands []manifestCandidate, id *key.Identity, identityPath st
 			notes = append(notes, c.err)
 			continue
 		}
-		m, err := manifest.Open(c.blob, id, id)
+		m, err := manifest.Open(c.blob, keys, keys)
 		if err != nil {
 			noteFail(c, err)
 			continue

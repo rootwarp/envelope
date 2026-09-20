@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"filippo.io/age"
 	"filippo.io/age/plugin"
@@ -17,12 +18,13 @@ const bundleHeaderPrefix = "# envelope-bundle:"
 // Order is the decrypt order: native identities first (no process, no card, no
 // prompt), then plugin identities in -identity order.
 type Set struct {
-	ids    []*Identity
-	pin    *pinSource
-	ui     *ClientUI
-	term   TerminalSource
-	nPaths int
-	bundle bool
+	ids          []*Identity
+	pin          *pinSource
+	ui           *ClientUI
+	term         TerminalSource
+	nPaths       int
+	bundle       bool
+	interactions atomic.Int32
 }
 
 // pinSource is filled by YK-11. HasPin is false until then.
@@ -93,12 +95,13 @@ func (s *Set) loadPath(path string) (natives, plugins []*Identity, err error) {
 			// plugin.ParseIdentity may quote the line; never wrap or return it.
 			return nil, nil, ErrInvalidIdentity
 		}
-		plugins = append(plugins, &Identity{
-			plugin:     p,
+		id := &Identity{
 			kind:       KindPlugin,
 			pluginName: p.Name(),
 			source:     path,
-		})
+		}
+		id.plugin = &pluginIdentity{inner: p, st: &id.attempt, n: &s.interactions}
+		plugins = append(plugins, id)
 	}
 
 	if hasNonComment(rest.Bytes()) {
@@ -171,6 +174,26 @@ func (s *Set) Interactive() bool {
 }
 
 func (s *Set) HasPin() bool { return s.pin != nil }
+
+func (s *Set) KeyIDFor(version, macSource uint32) ([]byte, error) {
+	if s == nil || len(s.ids) == 0 {
+		return nil, ErrNotSingleIdentity
+	}
+	// Card-free: the first identity's KeyIDFor never starts a plugin.
+	return s.ids[0].KeyIDFor(version, macSource)
+}
+
+func (s *Set) KeyFor(version, macSource uint32) ([]byte, error) {
+	if s == nil || len(s.ids) == 0 {
+		return nil, ErrNotSingleIdentity
+	}
+	for _, id := range s.ids {
+		if id.hasScalar {
+			return id.KeyFor(version, macSource)
+		}
+	}
+	return s.ids[0].KeyFor(version, macSource)
+}
 
 // BareFileIdentity is the FR-YK-03 boolean: exactly one path, exactly one
 // native X25519 identity, no bundle metadata. The caller still has to check

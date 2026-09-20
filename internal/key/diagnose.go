@@ -1,6 +1,7 @@
 package key
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/plugin"
+
+	"github.com/rootwarp/envelope/internal/crypt"
 
 	_ "golang.org/x/sys/execabs" // NFR-YK-01: pin the execabs module edge as direct
 )
@@ -31,6 +34,22 @@ var (
 func diagnose(id *Identity, err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if id != nil && id.kind == KindPlugin {
+		id.attempt.mu.Lock()
+		attempted := id.attempt.attempted
+		unwrapErr := id.attempt.err
+		id.attempt.mu.Unlock()
+		if !attempted {
+			return crypt.ErrMalformedAge
+		}
+		if unwrapErr == nil {
+			return err
+		}
+		err = unwrapErr
 	}
 	if errors.Is(err, age.ErrIncorrectIdentity) {
 		return err

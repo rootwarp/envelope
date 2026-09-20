@@ -296,6 +296,14 @@ pass the identity file the plugin prints as `-identity`.
 Any `age-plugin-*` works. YubiKey is the documented example, not a special case
 in the tool.
 
+### Two keys, one shard set
+
+Listing `-identity` twice is supported. Identities are tried in the order
+given, with native (file) identities first so a paper backup never waits on a
+card. An absent key is skipped without asking for its PIN. One unreachable
+key never blocks another: `restore -identity yk1.txt -identity yk2.txt` with
+only YK2 plugged in succeeds, in either order.
+
 ### Install the plugin
 
 Install `age-plugin-yubikey` from Homebrew, Nix, your distro package, or

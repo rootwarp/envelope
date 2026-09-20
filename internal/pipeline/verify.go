@@ -82,7 +82,7 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 	if err != nil {
 		return nil, err
 	}
-	defer set.id.Zero()
+	defer set.keys.Zero()
 
 	rep := &VerifyReport{
 		K:      set.m.K,
@@ -103,7 +103,7 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 	}
 
 	var sink countingSink
-	n, err := set.id.DecryptTo(&sink, func() io.Reader {
+	n, err := set.keys.DecryptTo(&sink, func() io.Reader {
 		return ctxReader(ctx, bytes.NewReader(ct))
 	})
 	if err != nil {

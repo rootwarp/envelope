@@ -47,7 +47,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	if err != nil {
 		return nil, err
 	}
-	defer set.id.Zero()
+	defer set.keys.Zero()
 
 	if err := set.usableErr(); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	n, err := decryptToFile(ctx, opts.OutPath, ct, set.id)
+	n, err := decryptToFile(ctx, opts.OutPath, ct, set.keys)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +80,18 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 
 type shardSet struct {
 	m       *manifest.Manifest
-	id      *key.Identity
+	keys    *key.Set
 	shards  [][]byte
 	failed  []int
 	missing []int
 	have    int
 	multi   bool // I4: true after dedup when two or more distinct directories remain
 }
+
+var (
+	_ manifest.Opener       = (*key.Set)(nil)
+	_ manifest.MACKeySource = (*key.Set)(nil)
+)
 
 func openShardSet(ctx context.Context, identityPath string, inDirs []string, scanAll bool, status io.Writer) (*shardSet, error) {
 	if len(inDirs) == 0 {
@@ -100,7 +105,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 	// Two spellings of one directory must stay single-directory output (FR-MD-06, AD-3).
 	multi := len(dirs) > 1
 
-	// Blobs are read BEFORE key.Load so ErrNoManifest and the manifest read
+	// Blobs are read BEFORE LoadSet so ErrNoManifest and the manifest read
 	// errors keep their Phase 1 precedence over an unloadable identity.
 	cands, searched := gatherManifests(dirs)
 	if len(cands) == 0 {
@@ -117,24 +122,26 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 		return nil, cands[0].err
 	}
 
-	id, err := key.Load(identityPath)
+	// Single-file path: repeatable -identity is YK-10. nil terminal is the
+	// v1 native case; a plugin identity fails closed at Unwrap precheck.
+	keys, err := key.LoadSet([]string{identityPath}, nil)
 	if err != nil {
 		return nil, err
 	}
-	macKey, err := id.ManifestMACKey()
+	macKey, err := keys.KeyFor(1, 0)
 	if err != nil {
-		id.Zero()
+		keys.Zero()
 		return nil, err
 	}
 	ok := false
 	defer func() {
 		clear(macKey)
 		if !ok {
-			id.Zero()
+			keys.Zero()
 		}
 	}()
 
-	m, err := chooseManifest(cands, id, identityPath, multi, status)
+	m, err := chooseManifest(cands, keys, identityPath, multi, status)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +156,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 	ok = true
 	return &shardSet{
 		m:       m,
-		id:      id,
+		keys:    keys,
 		shards:  shards,
 		failed:  failed,
 		missing: missing,
@@ -253,7 +260,7 @@ func readManifestBlob(path string) ([]byte, error) {
 
 // The named results exist for err alone — the deferred cleanup assigns to it.
 // Every error path returns n=0; a partial count is not a fact the caller may report.
-func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Identity) (n int64, err error) {
+func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set) (n int64, err error) {
 	partial := outPath + ".partial"
 
 	// O_EXCL: never silently truncate a leftover .partial — that file holds plaintext.
@@ -289,7 +296,7 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Ident
 	if testWrapDst != nil {
 		dst = testWrapDst(ctx, f)
 	}
-	n, err = id.DecryptTo(dst, func() io.Reader {
+	n, err = keys.DecryptTo(dst, func() io.Reader {
 		return ctxReader(ctx, bytes.NewReader(ct))
 	})
 	if err != nil {

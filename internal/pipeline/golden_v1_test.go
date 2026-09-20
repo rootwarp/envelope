@@ -120,6 +120,17 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	set, err := key.LoadSet([]string{idPath}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(set.Zero)
+	if _, err := set.DecryptBytes(blob); err != nil {
+		t.Fatal(err)
+	}
+	if set.Interactions() != 0 {
+		t.Fatalf("I-1: v1 golden decrypt Interactions = %d, want 0", set.Interactions())
+	}
 	if m.Version != 1 || m.K != 3 || m.N != 5 {
 		t.Fatalf("manifest Version=%d k=%d n=%d, want 1 3 5", m.Version, m.K, m.N)
 	}

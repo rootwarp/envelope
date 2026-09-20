@@ -4,6 +4,8 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 1. `age-plugin-yubikey --version` on `PATH`; record the version. On Linux, `pcscd` is running.
 
+10. `restore -identity yk1.txt -identity yk2.txt` with only YK2 present must succeed and must not prompt for YK1's PIN; then swap the order and repeat.
+
 12. `ykman piv reset` a spare key; `restore` and `verify` fail closed with a named diagnosis and write nothing.
 
 15. On a real terminal with stdin **and** stdout redirected, the PIN prompt still appears and is answerable.
