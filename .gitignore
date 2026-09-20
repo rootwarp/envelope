@@ -30,3 +30,7 @@ AGE-SECRET-KEY-*
 shard-*
 shards/
 *.partial
+
+# I-1: the committed v1 golden shard set is tracked.
+!test/golden/v1-shardset/shard-*
+!test/golden/v1-shardset/manifest.age
