@@ -49,7 +49,12 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 	if err != nil {
 		return nil, err
 	}
-	defer set.keys.Zero()
+	defer func() {
+		if ObserveRunInteractions != nil {
+			ObserveRunInteractions(set.keys.Interactions())
+		}
+		set.keys.Zero()
+	}()
 
 	if err := set.usableErr(); err != nil {
 		return nil, err
@@ -124,6 +129,8 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 		return nil, cands[0].err
 	}
 
+	groups := groupCandidates(cands)
+
 	src := terminalSource(term)
 	keys, err := key.LoadSet(identityPaths, src)
 	if err != nil {
@@ -144,9 +151,15 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 			ObserveOpenInteractions(keys.Interactions())
 		}
 		if !ok {
+			if ObserveRunInteractions != nil {
+				ObserveRunInteractions(keys.Interactions())
+			}
 			keys.Zero()
 		}
 	}()
+	// R5: every term is known (d from groups, p from the set, q from the
+	// pin record) and no plugin identity has been tried yet.
+	announceInteractionBudget(status, len(dirs), groups, keys)
 	// Eager v1 scalar derivation keeps plugin-only v1 restores failing
 	// closed with ErrNoScalar and zero invocations. A pin-bearing set
 	// without a scalar is v2: Open resolves the pin, and KeyFor(1, 0)
@@ -163,7 +176,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if testWrapManifestOpener != nil {
 		op = testWrapManifestOpener(op)
 	}
-	m, err := chooseManifest(groupCandidates(cands), keys, op, identitySource(keys, identityPaths), multi, status)
+	m, err := chooseManifest(groups, keys, op, identitySource(keys, identityPaths), multi, status)
 	if err != nil {
 		return nil, err
 	}
@@ -388,6 +401,12 @@ func (c *contextReader) Read(p []byte) (int, error) {
 // identical copies cost one decrypt site and that a v1 representative
 // consults no pin.
 var ObserveOpenInteractions func(int)
+
+// ObserveRunInteractions receives the identity-side Unwrap count at the end
+// of Restore or Verify (and of a failed openShardSet), before Zero. Tests
+// assert I-21: Interactions() ≤ the announced bound, including identities
+// tried and rejected. Production does not branch on the value.
+var ObserveRunInteractions func(int)
 
 // testWrapManifestOpener wraps the opener chooseManifest uses. Tests count
 // decrypts of distinct blobs.

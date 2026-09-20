@@ -124,3 +124,68 @@ func noteFirstPlugin(s *key.Set, status io.Writer) {
 		return
 	}
 }
+
+// announceInteractionBudget writes the §6.3 best-case and bound through
+// the existing status writer before any plugin identity is tried. Gated on
+// Interactive so a v1 or file-identity run's stderr stays byte-identical
+// (I-11). Production does not consult Interactions(); that counter is the
+// I-21 test instrument.
+func announceInteractionBudget(status io.Writer, nDirs int, groups []manifestGroup, keys *key.Set) {
+	if status == nil || keys == nil || !keys.Interactive() {
+		return
+	}
+	p := 0
+	for _, id := range keys.Identities() {
+		if id.Kind() == key.KindPlugin {
+			p++
+		}
+	}
+	d := 0
+	for _, g := range groups {
+		if g.rep.err == nil {
+			d++
+		}
+	}
+	q := 0
+	if keys.HasPin() {
+		q = 1
+	}
+	msg := budgetMessage(nDirs, d, p, q)
+	if msg == "" {
+		return
+	}
+	fmt.Fprintln(status, msg)
+}
+
+// budgetMessage is the operator-visible §6.3 line. The bound form is only
+// for p>1: with one plugin identity the two figures coincide. The
+// directory/copy preamble is a separate line only when more than one
+// directory or more than one distinct copy is in play.
+func budgetMessage(nDirs, d, p, q int) string {
+	if p < 1 {
+		return ""
+	}
+	best := d + 1 + q
+	line := fmt.Sprintf("this run needs %d plugin interactions, each of which may prompt", best)
+	if p > 1 {
+		line = fmt.Sprintf("this run needs %d plugin interactions, up to %d if every identity is tried — each may prompt", best, p*best)
+	}
+	if nDirs > 1 || d > 1 {
+		return budgetPreamble(nDirs, d) + ";\n" + line
+	}
+	return line
+}
+
+func budgetPreamble(nDirs, d int) string {
+	dirs := fmt.Sprintf("%d shard directories", nDirs)
+	hold := "hold"
+	if nDirs == 1 {
+		dirs = "1 shard directory"
+		hold = "holds"
+	}
+	copies := fmt.Sprintf("%d different manifest copies", d)
+	if d == 1 {
+		copies = "1 manifest copy"
+	}
+	return dirs + " " + hold + " " + copies
+}

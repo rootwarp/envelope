@@ -83,7 +83,12 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 	if err != nil {
 		return nil, err
 	}
-	defer set.keys.Zero()
+	defer func() {
+		if ObserveRunInteractions != nil {
+			ObserveRunInteractions(set.keys.Interactions())
+		}
+		set.keys.Zero()
+	}()
 
 	rep := &VerifyReport{
 		K:      set.m.K,

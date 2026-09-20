@@ -193,6 +193,35 @@ The identity is required because the manifest is encrypted. Verify writes
 nothing: `-in` is not modified, it works on read-only media, and it decrypts
 only in memory.
 
+A hardware identity means `verify` needs the plugin, the card, and the PIN:
+it decrypts `manifest.age`. That is accepted, not a gap to close. A card-free
+integrity scan would need an unauthenticated manifest, which the pin design
+forbids.
+
+Verifying cold media therefore costs card interactions. A recovery drill over
+three USB sticks is a real prompt sequence, not a free scan, and copying
+`manifest.age` beside each shard set is what keeps it at the one-directory
+cost. Envelope prints the plugin-interaction budget on stderr before it
+starts the plugin:
+
+```
+3 shard directories hold 2 different manifest copies;
+this run needs 4 plugin interactions, up to 8 if every identity is tried — each may prompt
+```
+
+The first number is what the run costs if the key in your hand is the one it
+tries first; the second is what it costs if every listed key gets tried. The
+actual cost can fall below both, because a v1 manifest needs no pin. With one
+plugin identity the two numbers coincide and the "up to" clause drops:
+
+```
+1 shard directory holds 1 manifest copy; this run needs 3 plugin interactions, each of which may prompt
+```
+
+A single directory holding one copy prints only the second sentence. Listing
+your working key first is worth a prompt or two: Envelope does not remember
+which identity succeeded, so each decrypt site searches from the start.
+
 The report is on stdout, always `n + 4` lines. A `(3,5)` set with one missing
 shard and one corrupt shard:
 
@@ -219,12 +248,14 @@ Each shard is `ok`, `missing`, or `corrupt`. The payload line is
 | `damaged` | At least one shard corrupt, but the set still restores | 1 |
 | `unrestorable` | Fewer than `k` shards ok, or the payload failed | 1 |
 
-With one `-in`, `healthy` and `degraded` print nothing on stderr. With two or
-more, `verify` names every rejected copy the walk reached — a rotten redundant
-copy is visible here and invisible to `restore`. `damaged` names the failing
-indices on stderr, then `shard set is damaged: at least one shard failed its
-digest`. A manifest or identity failure prints nothing on stdout and the same
-message restore would.
+With one `-in` and a file identity, `healthy` and `degraded` print nothing on
+stderr. A hardware identity prints the plugin-interaction budget on stderr
+before any plugin starts; that line does not change the `n + 4` stdout
+report. With two or more `-in` directories, `verify` names every rejected copy
+the walk reached — a rotten redundant copy is visible here and invisible to
+`restore`. `damaged` names the failing indices on stderr, then `shard set is
+damaged: at least one shard failed its digest`. A manifest or identity
+failure prints nothing on stdout and the same message restore would.
 
 ## Print the recipient
 

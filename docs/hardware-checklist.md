@@ -16,6 +16,8 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 7. `split` a ≥ 1 MiB file at `(3,5)`, delete two shards, `restore`, `cmp` identical — on a generated-on-card key **and** an imported key.
 
+8. count plugin interactions for `restore` and `verify` and record them against architecture §6.3; repeat `verify` with two `-in` directories and record whether the prompt count grew
+
 9. Backup proven: a `(3,5)` set split to `[YK1, YK2, paper]` restores from each of the three independently, with the other two absent.
 
 10. `restore -identity yk1.txt -identity yk2.txt` with only YK2 present must succeed and must not prompt for YK1's PIN; then swap the order and repeat.
