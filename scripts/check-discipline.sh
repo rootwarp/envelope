@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
-# Import-graph and grep gates (FR-20, FR-19, FR-24, FR-35).
-# FR-20's AC mandates D1; D2–D5 extend the same go list -deps mechanism.
+# Import-graph and grep gates (FR-20, FR-19, FR-24, FR-35, FR-YK-18, FR-YK-08).
+# D1: crypt and erasure never depend on each other (FR-20 AC).
+# D2: pipeline imports only key, crypt, erasure, manifest + stdlib.
+# D3: nothing under internal/ imports pipeline; cmd/envelope is its only importer.
+# D4: manifest never depends on erasure.
+# D5: internal/key/bech32 is imported by internal/key only.
+# D6: only cmd/envelope may import github.com/urfave/cli/v3.
+# D7: cmd/envelope imports only pipeline, urfave/cli/v3 + stdlib.
+# D9: filippo.io/age/plugin is imported by internal/key and test/fakeplugin only.
+# D10: test/fakeplugin is imported by _test.go files only.
+# D11: the literal yubikey appears nowhere under internal/ or cmd/.
+# D12: SysProcAttr / Setpgid appear nowhere in the tree.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -114,6 +124,47 @@ if pkg_exists ./cmd/envelope; then
 			fail "D7: cmd/envelope imports $imp (only pipeline, github.com/urfave/cli/v3 + stdlib allowed)"
 		fi
 	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/cmd/envelope"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./cmd/envelope)
+fi
+
+# D9: filippo.io/age/plugin is imported by internal/key and test/fakeplugin only.
+# Inspect .Imports, .TestImports and .XTestImports (D6's form, not D5's).
+while IFS= read -r rec; do
+	[ -n "$rec" ] || continue
+	imp=${rec%% *}
+	pkg=${rec#* }
+	case "$imp" in
+	filippo.io/age/plugin | filippo.io/age/plugin/*) ;;
+	*) continue ;;
+	esac
+	case "$pkg" in
+	"$mod/internal/key" | "$mod/test/fakeplugin") continue ;;
+	esac
+	fail "D9: $pkg imports filippo.io/age/plugin (only internal/key and test/fakeplugin may)"
+done < <(go list -f '{{range .Imports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .TestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}' ./...)
+
+# D10: test/fakeplugin is imported by _test.go files only (.Imports, not test imports).
+while IFS= read -r rec; do
+	[ -n "$rec" ] || continue
+	imp=${rec%% *}
+	pkg=${rec#* }
+	if [ "$imp" = "$mod/test/fakeplugin" ]; then
+		fail "D10: $pkg imports test/fakeplugin from non-test sources (only _test.go files may)"
+	fi
+done < <(go list -f '{{range .Imports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}' ./...)
+
+# D11: the literal yubikey appears nowhere under internal/ or cmd/.
+d11_paths=()
+[ -d internal ] && d11_paths+=(internal)
+[ -d cmd ] && d11_paths+=(cmd)
+if [ "${#d11_paths[@]}" -gt 0 ]; then
+	if matches=$(grep -rniI 'yubikey' "${d11_paths[@]}"); then
+		fail "D11: yubikey literal under internal/ or cmd/" "$matches"
+	fi
+fi
+
+# D12: SysProcAttr / Setpgid appear nowhere in the tree.
+if matches=$(grep -rnE --include='*.go' 'SysProcAttr|Setpgid' .); then
+	fail "D12: SysProcAttr / Setpgid in the tree" "$matches"
 fi
 
 # FR-35: no os.Stdout / os.Stderr below the entry point …
