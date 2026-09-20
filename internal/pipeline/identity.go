@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,16 @@ var ErrNoPinTerminal = errors.New("this identity needs a PIN and there is no ter
 // testOpenTerminal, when set, replaces key.OpenTerminal for the production
 // source. Tests force a missing or present terminal without a real /dev/tty.
 var testOpenTerminal func() (Terminal, error)
+
+// testCaptureCtx, when set, receives the command context. The
+// envelope_signaltest build parks a plugin prompt on it.
+var testCaptureCtx func(context.Context)
+
+func captureTestContext(ctx context.Context) {
+	if testCaptureCtx != nil {
+		testCaptureCtx(ctx)
+	}
+}
 
 func terminalSource(t Terminal) key.TerminalSource {
 	if t != nil {

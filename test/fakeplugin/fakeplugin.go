@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,8 @@ const (
 	invocationsEnv = "ENVELOPE_FAKEPLUGIN_INVOCATIONS"
 	// protocolEnv is the absolute path of the file handlers append commands to.
 	protocolEnv = "ENVELOPE_FAKEPLUGIN_PROTOCOL"
+	// pidsEnv is the absolute path of the file Dispatch appends PIDs to.
+	pidsEnv = "ENVELOPE_FAKEPLUGIN_PIDS"
 )
 
 // link is os.Link; tests replace it to force the copy fallback.
@@ -116,6 +119,11 @@ func Install(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	t.Setenv(protocolEnv, protoPath)
+	pidPath := filepath.Join(dir, "pids.log")
+	if err := os.WriteFile(pidPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pidsEnv, pidPath)
 	return dir
 }
 
@@ -130,6 +138,20 @@ func recordInvocation() {
 	}
 	_, _ = fmt.Fprintf(f, "%s\n", os.Args[0])
 	_ = f.Close()
+	recordPID()
+}
+
+func recordPID() {
+	p := os.Getenv(pidsEnv)
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
+	_ = f.Close()
 }
 
 // Invocations returns the absolute plugin paths Dispatch recorded for this
@@ -137,6 +159,20 @@ func recordInvocation() {
 func Invocations(t *testing.T) []string {
 	t.Helper()
 	return readLogLines(t, os.Getenv(invocationsEnv))
+}
+
+// PIDs returns the plugin process IDs Dispatch recorded for this Install.
+func PIDs(t *testing.T) []int {
+	t.Helper()
+	var out []int
+	for _, line := range readLogLines(t, os.Getenv(pidsEnv)) {
+		pid, err := strconv.Atoi(line)
+		if err != nil || pid <= 0 {
+			continue
+		}
+		out = append(out, pid)
+	}
+	return out
 }
 
 // ProtocolLog returns the age plugin commands this Install recorded

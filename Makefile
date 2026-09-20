@@ -27,7 +27,8 @@ race:
 	go test -count=1 -race ./...
 
 # Never run the suite with -tags envelope_signaltest: every in-process restore
-# would park until go test's own timeout.
+# and every plugin PIN prompt would park until go test's own timeout.
+# -run SIG covers the exec'd signal tests and excludes the WaitTimer sleep.
 sigstress:
 	go test -count=20 -race -run 'SIG' ./cmd/envelope
 

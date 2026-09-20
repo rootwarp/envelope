@@ -35,6 +35,7 @@ type RestoreReport struct {
 }
 
 func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*RestoreReport, error) {
+	captureTestContext(ctx)
 	// Advisory: O_EXCL on .partial is the real gate. Fail here so a leftover
 	// is reported in a second, not after reconstructing GiB of shards.
 	partial := opts.OutPath + ".partial"

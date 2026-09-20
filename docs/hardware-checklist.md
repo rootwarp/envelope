@@ -30,6 +30,8 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 15. On a real terminal with stdin **and** stdout redirected, the PIN prompt still appears and is answerable.
 
+16. During a touch wait, Ctrl-C leaves no `.partial`, no `-out`, no partial shard set, and no `age-plugin-yubikey` process (`pgrep age-plugin`).
+
 17. `AGEDEBUG=plugin` emits Envelope's warning before any plugin starts; confirm on a throwaway PIN that the PIN does appear on stderr.
 
 18. Over a marker-bearing input with a real PIN, grep every shard, every stream and every log for the marker and for the PIN.

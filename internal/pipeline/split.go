@@ -52,6 +52,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	captureTestContext(ctx)
 
 	src := terminalSource(opts.Terminal)
 	set, err := key.LoadSet([]string{opts.IdentityPath}, src)
@@ -160,17 +161,22 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 
 	if !v1 {
 		// S9 is the only legal pin-unwrap slot: after payload encrypt (FR-YK-05)
-		// and before the first shard write (FR-YK-04).
+		// and before the first shard write (FR-YK-04). A plugin-prompt
+		// interruption is an S9 error: shards written before this return
+		// (none, unless a test injected them) must not survive.
 		if err := refuseInteractiveWithoutTerminal(set, src); err != nil {
+			removeIncompleteSplit(opts.OutDir)
 			return nil, err
 		}
 		macKey, err = set.KeyFor(manifest.VersionPin, manifest.MACSourcePin)
 		if err != nil {
+			removeIncompleteSplit(opts.OutDir)
 			return nil, pinErr(err)
 		}
 		defer clear(macKey)
 		macKeyID, err = set.KeyIDFor(manifest.VersionPin, manifest.MACSourcePin)
 		if err != nil {
+			removeIncompleteSplit(opts.OutDir)
 			return nil, pinErr(err)
 		}
 	}

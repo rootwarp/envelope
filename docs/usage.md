@@ -343,9 +343,13 @@ Hardware identities prompt on the terminal (`/dev/tty`), never on stdout.
 
 A run with no controlling terminal and an interactive identity is refused
 before any plugin starts, with `this identity needs a PIN and there is no
-terminal to ask on`, and writes nothing. A programmatic cancellation cannot
-interrupt a blocked plugin, so refusing early is the guarantee. Envelope never
-falls back to stdin, which may be the payload.
+terminal to ask on`, and writes nothing. Ctrl-C in a terminal cancels the run
+and leaves nothing behind — no `.partial`, no `-out`, no partial shard set,
+and no `age-plugin-*` process — because the plugin shares Envelope's process group,
+so the signal reaches it directly. A programmatic SIGTERM or timeout cannot
+interrupt a plugin that is blocked waiting for a card, which is why a run with
+no terminal is refused up front rather than started and killed.
+Envelope never falls back to stdin, which may be the payload.
 
 There is **no touch prompt for any key**, generated or imported. After five
 seconds Envelope prints a wait line (`waiting on age-plugin-<name>…`). Touch
