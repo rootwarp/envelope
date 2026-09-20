@@ -231,13 +231,17 @@ func Replace(path string, b *Bundle) error {
 	}
 	tmp := path + ".tmp"
 	if err := writeNew0600(tmp, data); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	rename := os.Rename
-	if testReplaceRename != nil {
-		rename = testReplaceRename
+	if ReplaceRename != nil {
+		rename = ReplaceRename
 	}
 	if err := rename(tmp, path); err != nil {
+		// A failed commit must not leave path.tmp: bind's interrupted
+		// modify is otherwise indistinguishable from a second bundle.
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := syncDir(filepath.Dir(path)); err != nil {
@@ -247,9 +251,9 @@ func Replace(path string, b *Bundle) error {
 	return nil
 }
 
-// testReplaceRename replaces os.Rename in Replace. Tests inject a failure
+// ReplaceRename replaces os.Rename in Replace. Tests inject a failure
 // between the tmp write and the commit.
-var testReplaceRename func(oldpath, newpath string) error
+var ReplaceRename func(oldpath, newpath string) error
 
 func marshalBundle(b *Bundle) ([]byte, error) {
 	if b == nil {

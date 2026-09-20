@@ -464,8 +464,8 @@ func TestReplaceCrashSafe(t *testing.T) {
 	}
 
 	injected := errors.New("injected rename failure")
-	testReplaceRename = func(string, string) error { return injected }
-	t.Cleanup(func() { testReplaceRename = nil })
+	ReplaceRename = func(string, string) error { return injected }
+	t.Cleanup(func() { ReplaceRename = nil })
 
 	err = Replace(path, b)
 	if !errors.Is(err, injected) {
@@ -476,6 +476,47 @@ func TestReplaceCrashSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSameBytes(t, got, orig)
+	if _, err := os.Lstat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("interrupted Replace left a .tmp file")
+	}
+}
+
+func TestReplaceWriteFailureLeavesNoTmp(t *testing.T) {
+	b, _ := mustNativeBundle(t)
+	path := filepath.Join(t.TempDir(), "bundle.txt")
+	if err := WriteNew(path, b); err != nil {
+		t.Fatal(err)
+	}
+	orig, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id2, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(id2.Zero)
+	if err := b.ReplaceIdentities([]string{id2.age.String()}); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected write failure")
+	testFailWriteNew = func() error { return injected }
+	t.Cleanup(func() { testFailWriteNew = nil })
+
+	err = Replace(path, b)
+	if !errors.Is(err, injected) {
+		t.Fatalf("errors.Is(., injected) = false: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, orig)
+	if _, err := os.Lstat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("failed writeNew0600 left a .tmp file")
+	}
 }
 
 func TestPinWrappedToRecordedRecipients(t *testing.T) {

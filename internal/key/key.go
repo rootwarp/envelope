@@ -101,9 +101,23 @@ func writeNew0600(path string, data []byte) error {
 		}
 		return err
 	}
+	if err := writeNew0600Opened(f, path, data); err != nil {
+		// A leftover after O_EXCL makes retry "already exists" and a
+		// Replace tmp look like a second bundle.
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+func writeNew0600Opened(f *os.File, path string, data []byte) error {
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return err
+	}
+	if testFailWriteNew != nil {
+		f.Close()
+		return testFailWriteNew()
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
@@ -120,6 +134,10 @@ func writeNew0600(path string, data []byte) error {
 	}
 	return syncDir(filepath.Dir(path))
 }
+
+// testFailWriteNew, when set, runs after Write and replaces Sync. Tests
+// inject a write/sync failure after O_EXCL create.
+var testFailWriteNew func() error
 
 func syncDir(dir string) error {
 	d, err := os.Open(dir)

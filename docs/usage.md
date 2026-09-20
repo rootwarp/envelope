@@ -393,6 +393,90 @@ line — so you can read a backup and confirm it is the right one without the
 card. The seed is long-lived on purpose and is never regenerated: a silently
 new seed would look, to you, like every shard set you own had been forged.
 
+A v2 manifest is not readable by a pre-hardware Envelope. Back the bundle up
+alongside the key material, and **do not roll back past this release after
+splitting with a bundle**.
+
+### bind
+
+`bind` writes the bundle. It is not keygen-for-hardware: it creates **no key
+material on a device**. `age-plugin-yubikey --generate` or `ykman piv keys
+import` owns that. Envelope never drives the PIV applet, manages PINs, or
+writes certificates.
+
+Three modes. Exactly one of `-out` with `-identity`, `-bundle` with
+`-add-recipient`, or `-bundle` with `-replace-identity`. A conflict or a
+missing pair is usage (exit 2). None of the flags is required on its own,
+because there are three shapes.
+
+**Create** costs **0** plugin interactions (encryption is to recipient
+strings only):
+
+```sh
+envelope bind -identity stub.txt -recipient age1yubikey1… -recipient age1… -out bundle.txt
+```
+
+**Add a recipient** re-wraps the **same** seed and costs **1** plugin
+interaction (never mints a seed):
+
+```sh
+envelope bind -bundle bundle.txt -add-recipient age1…
+```
+
+**Replace the identity line** copies the pin ciphertext verbatim, leaves
+recipients and `mac_key_id` untouched, and costs **0** plugin interactions:
+
+```sh
+envelope bind -bundle bundle.txt -replace-identity stub.txt
+```
+
+Create refuses to overwrite: `identity file already exists` (exit 1). The
+file is mode `0600`, valid UTF-8, and holds no 32-byte cleartext secret.
+
+#### The rotation trap
+
+`-add-recipient` re-wraps the same seed so every existing *manifest* keeps
+verifying, but age has no recipient rotation. Payloads already written remain
+decryptable only by the original set. Adding a recipient for the *payload*
+means a fresh `split`. See [issue #75](https://github.com/rootwarp/envelope/issues/75).
+
+#### Imported-key recovery
+
+The recoverable configuration is Envelope's recommendation, because a
+generated-on-card key dies with the device. Generate a P-256 key offline,
+`ykman piv keys import` it, generate a certificate, then
+`age-plugin-yubikey --identity --slot N`. Bare `--identity` **hides** imported
+keys: the gate is the certificate's Subject Organization attribute, not
+attestation. An imported key cannot satisfy attestation, so the plugin reads
+neither PIN nor touch policy and **always prompts for a PIN**. The recoverable
+configuration is the noisier one.
+
+Record, for each key: model, firmware (5.7+ preferred), serial, retired slot,
+generated-on-card vs imported, PIN and touch policies — and that an imported
+key's policies are unreadable. Get the recipient string from `--list` /
+`--list-all`.
+
+#### Replacement drill
+
+Import the backed-up P-256 key into a replacement YubiKey, regenerate the
+stub (`--identity --slot N`), then `envelope bind -replace-identity`. Every
+existing shard set restores unchanged, with no re-encryption. The recipient
+string is byte-identical (it is the public key); the stub is not, because it
+embeds the device serial.
+
+#### Indirection (not the default)
+
+Someone who has decided rotation matters more than non-exportability can
+encrypt the payload to a master X25519 identity and wrap that master to N
+recipients. That pattern is documented here so the cost is visible, not so
+it becomes the default.
+
+**Cost to Goal #1 (the decryption key is non-exportable):** the decryption
+key becomes a software scalar present in Envelope's address space at every
+split and restore. One decryption of the bundle copies it, and the YubiKey
+is never needed again. That converts non-exportable custody into a one-time
+gate in front of an exportable key.
+
 ## Troubleshooting
 
 | Message | Cause | Fix |

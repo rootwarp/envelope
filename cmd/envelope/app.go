@@ -57,6 +57,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out"), Terminal: testTerminal}, a.stderr)
 				},
 			}),
+			a.bindCommand(),
 			a.newCommand(cmdSpec{
 				name:        "split",
 				summary:     summarySplit,
@@ -161,12 +162,7 @@ func pathFlag(name, usage string) cli.Flag {
 		Required:  true,
 		TakesFile: true,
 		// Required treats -out "" as set.
-		Validator: func(s string) error {
-			if s == "" {
-				return fmt.Errorf("-%s must not be empty", name)
-			}
-			return nil
-		},
+		Validator: nonemptyString(name),
 	}
 }
 
@@ -178,13 +174,52 @@ func pathSliceFlag(name, usage string) cli.Flag {
 		TakesFile: true,
 		// Required treats -in "" as set. The validator sees the accumulated
 		// slice after each element, so it never sees an empty slice.
-		Validator: func(vs []string) error {
-			for _, v := range vs {
-				if v == "" {
-					return fmt.Errorf("-%s must not be empty", name)
-				}
+		Validator: nonemptyStrings(name),
+	}
+}
+
+func optionalPathFlag(name, usage string) cli.Flag {
+	return &cli.StringFlag{
+		Name:      name,
+		Usage:     usage,
+		TakesFile: true,
+		Validator: nonemptyString(name),
+	}
+}
+
+func optionalPathSliceFlag(name, usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:      name,
+		Usage:     usage,
+		TakesFile: true,
+		Validator: nonemptyStrings(name),
+	}
+}
+
+func optionalStringSliceFlag(name, usage string) cli.Flag {
+	return &cli.StringSliceFlag{
+		Name:      name,
+		Usage:     usage,
+		Validator: nonemptyStrings(name),
+	}
+}
+
+func nonemptyString(name string) func(string) error {
+	return func(s string) error {
+		if s == "" {
+			return fmt.Errorf("-%s must not be empty", name)
+		}
+		return nil
+	}
+}
+
+func nonemptyStrings(name string) func([]string) error {
+	return func(vs []string) error {
+		for _, v := range vs {
+			if v == "" {
+				return fmt.Errorf("-%s must not be empty", name)
 			}
-			return nil
-		},
+		}
+		return nil
 	}
 }

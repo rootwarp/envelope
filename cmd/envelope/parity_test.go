@@ -158,6 +158,11 @@ func TestHelpDoesNotAct(t *testing.T) {
 			args: []string{"restore", "-identity", id, "-in", shards, "-out", restoreOut, "-h"},
 			gone: []string{restoreOut, restoreOut + ".partial"},
 		},
+		{
+			name: "bind",
+			args: []string{"bind", "-identity", id, "-out", filepath.Join(dir, "bundle.txt"), "-h"},
+			gone: []string{filepath.Join(dir, "bundle.txt")},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

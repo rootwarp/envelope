@@ -4,7 +4,15 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 1. `age-plugin-yubikey --version` on `PATH`; record the version. On Linux, `pcscd` is running.
 
+2. Record, for each key used: model, firmware version (5.7+ preferred), serial, PIV slot (retired slot N), whether the key was generated on-card or imported, and its PIN and touch policies. For an imported key, note that the plugin cannot read either policy and will prompt for a PIN regardless, and will not announce a touch.
+
+3. `age-plugin-yubikey --identity --slot N > stub.txt` for an imported key (bare `--identity` hides it); `--identity` alone for a generated one. Record the recipient string from `--list` / `--list-all`.
+
+4. `envelope bind -identity stub.txt -recipient <yk-recipient> -recipient <paper-recipient> -out bundle.txt`; assert mode `0600`, valid UTF-8, no 32-byte cleartext secret, and `age -d -i bundle.txt` works against an Envelope-written `manifest.age`.
+
 10. `restore -identity yk1.txt -identity yk2.txt` with only YK2 present must succeed and must not prompt for YK1's PIN; then swap the order and repeat.
+
+11. Replacement drill. Import the backed-up P-256 key into a second YubiKey, regenerate the stub, `envelope bind -replace-identity`, and restore an existing shard set with no re-encryption. Confirm the recipient string is byte-identical to the original.
 
 12. `ykman piv reset` a spare key; `restore` and `verify` fail closed with a named diagnosis and write nothing.
 

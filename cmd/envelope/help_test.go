@@ -142,6 +142,7 @@ func TestHelpContent(t *testing.T) {
 		{cmd: "keygen", want: []string{"refuses to overwrite", "unrecoverable", "Examples:"}},
 		{cmd: "split", want: []string{"(default: 3)", "(default: 5)", "1 ≤ k < n ≤ 256", "absent or empty", "written last", "Examples:"}},
 		{cmd: "restore", want: []string{"is overwritten", ".partial", "Examples:"}},
+		{cmd: "bind", want: []string{"Three modes", "-add-recipient", "-replace-identity", "0 plugin interactions", "never mints a seed", "Examples:"}},
 	}
 	for _, tt := range pages {
 		t.Run(tt.cmd, func(t *testing.T) {
