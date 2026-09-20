@@ -137,18 +137,23 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if nativeScalar(keys) == nil {
 		noteFirstPlugin(keys, status)
 	}
-	macKey, err := keys.KeyFor(1, 0)
-	if err != nil {
-		keys.Zero()
-		return nil, err
-	}
 	ok := false
 	defer func() {
-		clear(macKey)
 		if !ok {
 			keys.Zero()
 		}
 	}()
+	// Eager v1 scalar derivation keeps plugin-only v1 restores failing
+	// closed with ErrNoScalar and zero invocations. A pin-bearing set
+	// without a scalar is v2: Open resolves the pin, and KeyFor(1, 0)
+	// here would abort before the manifest is read.
+	if nativeScalar(keys) != nil || !keys.HasPin() {
+		macKey, err := keys.KeyFor(1, 0)
+		if err != nil {
+			return nil, err
+		}
+		defer clear(macKey)
+	}
 
 	m, err := chooseManifest(cands, keys, identitySource(keys, identityPaths), multi, status)
 	if err != nil {

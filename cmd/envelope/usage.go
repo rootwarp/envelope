@@ -46,12 +46,14 @@ Examples:
   envelope bind -identity stub.txt -recipient age1... -out bundle.txt
   envelope bind -bundle bundle.txt -add-recipient age1...
   envelope bind -bundle bundle.txt -replace-identity stub.txt`
-	descriptionSplit = `Protects -in using the identity from keygen.
+	descriptionSplit = `Protects -in using the identity from keygen, or a bundle from bind.
+Optional -recipient replaces the recorded recipient set for this split only; it never rewrites the bundle.
 Constraint: 1 ≤ k < n ≤ 256. -out must be absent or empty; created 0700 if absent.
 manifest.age is written last. A directory without it is an incomplete split — delete it and run again.
 
 Examples:
-  envelope split -identity identity.txt -in secret.bin -out shards/ -k 3 -n 5`
+  envelope split -identity identity.txt -in secret.bin -out shards/ -k 3 -n 5
+  envelope split -identity bundle.txt -in secret.bin -out shards/`
 	descriptionRestore = `Restores a file from at least k shards and a manifest.age in -in.
 -identity may be repeated. Identities are tried in the order given.
 -in may be repeated. Directories are searched in the order given; the first usable copy of each shard wins. A manifest is needed in at least one of them.

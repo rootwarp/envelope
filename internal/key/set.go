@@ -233,6 +233,18 @@ func (s *Set) Interactive() bool {
 
 func (s *Set) HasPin() bool { return s.pin != nil }
 
+// RecordedRecipients is the bundle's public recipient set, or nil. Split
+// encrypts to these strings when -recipient is omitted; comparing against
+// them is how it warns on a disjoint -recipient set without a card.
+func (s *Set) RecordedRecipients() []string {
+	if s == nil || s.pin == nil {
+		return nil
+	}
+	out := make([]string, len(s.pin.recipients))
+	copy(out, s.pin.recipients)
+	return out
+}
+
 func (s *Set) pinChoice() error {
 	if s.pinAmbiguous {
 		return ErrAmbiguousPin

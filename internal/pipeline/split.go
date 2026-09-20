@@ -39,6 +39,10 @@ func ValidateKN(k, n int) error {
 	return erasure.Validate(k, n)
 }
 
+// ObserveSplitInteractions receives the identity-side Unwrap count after Split
+// returns, before Zero. Tests assert v1=0 / v2=p·q with it.
+var ObserveSplitInteractions func(int)
+
 func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitReport, error) {
 	// Validate before any filesystem call so a bad (k, n) cannot leave a
 	// half-created directory.
@@ -49,22 +53,67 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 
-	id, err := key.Load(opts.IdentityPath)
+	src := terminalSource(opts.Terminal)
+	set, err := key.LoadSet([]string{opts.IdentityPath}, src)
 	if err != nil {
 		return nil, err
+	}
+	defer set.Zero()
+	if ObserveSplitInteractions != nil {
+		defer func() { ObserveSplitInteractions(set.Interactions()) }()
 	}
 
-	macKey, err := id.ManifestMACKey()
-	if err != nil {
-		id.Zero()
-		return nil, err
+	// One invocation-level boolean, decided before -in or -out is touched.
+	// v1 keeps Load + ManifestMACKey so Phase 1 error identity is construction.
+	v1 := set.BareFileIdentity() && len(opts.Recipients) == 0
+
+	var (
+		macKey   []byte
+		macKeyID []byte
+		rs       *key.RecipientSet
+	)
+	if v1 {
+		id, err := key.Load(opts.IdentityPath)
+		if err != nil {
+			return nil, err
+		}
+		macKey, err = id.ManifestMACKey()
+		if err != nil {
+			id.Zero()
+			return nil, err
+		}
+		defer func() {
+			// Best-effort: hkdf.Key returns a fresh slice the GC may already have copied.
+			clear(macKey)
+			// Best-effort: cannot scrub copies already made by hkdf.Key or the GC.
+			id.Zero()
+		}()
+		rs, err = key.NewRecipientSet(id)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		recStrs := opts.Recipients
+		if len(recStrs) == 0 {
+			recStrs = set.RecordedRecipients()
+		}
+		if len(recStrs) == 0 {
+			// Non-bundle file identities that are not BareFileIdentity keep
+			// key.Load's Phase 1 sentinels (two identities, hybrid, …).
+			if _, err := key.Load(opts.IdentityPath); err != nil {
+				return nil, err
+			}
+			return nil, key.ErrNoPin
+		}
+		ui := key.NewClientUI(src)
+		rs, err = key.ParseRecipients(recStrs, ui)
+		if err != nil {
+			return nil, err
+		}
 	}
-	defer func() {
-		// Best-effort: hkdf.Key returns a fresh slice the GC may already have copied.
-		clear(macKey)
-		// Best-effort: cannot scrub copies already made by hkdf.Key or the GC.
-		id.Zero()
-	}()
+
+	warnSolePluginRecipient(rs, status)
+	warnDisjointRecipients(opts.Recipients, set.RecordedRecipients(), status)
 
 	if entries, err := os.ReadDir(opts.OutDir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrOutDirNotEmpty, opts.OutDir)
@@ -83,11 +132,6 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 	defer in.Close()
-
-	rs, err := key.NewRecipientSet(id)
-	if err != nil {
-		return nil, err
-	}
 
 	var buf bytes.Buffer
 	var ciphertextLen int64
@@ -114,6 +158,23 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, fmt.Errorf("ciphertext is %d bytes, shorter than k=%d", ciphertextLen, opts.K)
 	}
 
+	if !v1 {
+		// S9 is the only legal pin-unwrap slot: after payload encrypt (FR-YK-05)
+		// and before the first shard write (FR-YK-04).
+		if err := refuseInteractiveWithoutTerminal(set, src); err != nil {
+			return nil, err
+		}
+		macKey, err = set.KeyFor(manifest.VersionPin, manifest.MACSourcePin)
+		if err != nil {
+			return nil, pinErr(err)
+		}
+		defer clear(macKey)
+		macKeyID, err = set.KeyIDFor(manifest.VersionPin, manifest.MACSourcePin)
+		if err != nil {
+			return nil, pinErr(err)
+		}
+	}
+
 	enc, err := erasure.New(opts.K, opts.N)
 	if err != nil {
 		return nil, err
@@ -138,7 +199,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		digests[i] = d
 	}
 
-	sealed, err := manifest.Seal(&manifest.Manifest{
+	man := &manifest.Manifest{
 		Version:       manifest.Version,
 		K:             opts.K,
 		N:             opts.N,
@@ -146,7 +207,13 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		StripeLen:     stripeLen,
 		Digests:       digests,
 		MAC:           make([]byte, manifest.MACLen), // Seal validates shape before filling the tag
-	}, macKey, rs)
+	}
+	if !v1 {
+		man.Version = manifest.VersionPin
+		man.MACSource = manifest.MACSourcePin
+		man.MACKeyID = macKeyID
+	}
+	sealed, err := manifest.Seal(man, macKey, rs)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +274,55 @@ var testInjectCiphertext func() []byte
 // testBeforeShardWrite runs at the start of each shard write. Tests cancel ctx
 // after the first shard to prove incomplete output is removed.
 var testBeforeShardWrite func(i int)
+
+const solePluginWarningFmt = "only one recipient (%s): if that key is lost, reset or replaced by a firmware recall, this payload is gone. `envelope bind -add-recipient` adds a recovery recipient, but only for future splits.\n"
+
+func warnSolePluginRecipient(rs *key.RecipientSet, status io.Writer) {
+	if status == nil || rs == nil {
+		return
+	}
+	if _, ok := rs.SolePlugin(); !ok {
+		return
+	}
+	strs := rs.Strings()
+	if len(strs) != 1 {
+		return
+	}
+	fmt.Fprintf(status, solePluginWarningFmt, strs[0])
+}
+
+func warnDisjointRecipients(chosen, recorded []string, status io.Writer) {
+	if status == nil || len(chosen) == 0 || len(recorded) == 0 {
+		return
+	}
+	if sharesRecipient(chosen, recorded) {
+		return
+	}
+	fmt.Fprintln(status, "recipient set shares no string with the bundle; a bundle identity will not restore this payload")
+}
+
+func sharesRecipient(a, b []string) bool {
+	seen := make(map[string]struct{}, len(b))
+	for _, s := range b {
+		seen[s] = struct{}{}
+	}
+	for _, s := range a {
+		if _, ok := seen[s]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func pinErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, key.ErrPinCorrupt) || errors.Is(err, key.ErrNoPin) || errors.Is(err, key.ErrAmbiguousPin) {
+		return err
+	}
+	return fmt.Errorf("identity bundle pin: %w", err)
+}
 
 func abortCanceledSplit(ctx context.Context, outDir string) error {
 	if err := ctx.Err(); err != nil {

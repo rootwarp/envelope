@@ -34,6 +34,8 @@ const (
 	// invocationsEnv is the absolute path of the file Dispatch appends to.
 	// Install sets it so a re-exec'd plugin records itself; production never sets it.
 	invocationsEnv = "ENVELOPE_FAKEPLUGIN_INVOCATIONS"
+	// protocolEnv is the absolute path of the file handlers append commands to.
+	protocolEnv = "ENVELOPE_FAKEPLUGIN_PROTOCOL"
 )
 
 // link is os.Link; tests replace it to force the copy fallback.
@@ -109,6 +111,11 @@ func Install(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	t.Setenv(invocationsEnv, logPath)
+	protoPath := filepath.Join(dir, "protocol.log")
+	if err := os.WriteFile(protoPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(protocolEnv, protoPath)
 	return dir
 }
 
@@ -129,7 +136,18 @@ func recordInvocation() {
 // Install. Empty when no age-plugin-* process started.
 func Invocations(t *testing.T) []string {
 	t.Helper()
-	p := os.Getenv(invocationsEnv)
+	return readLogLines(t, os.Getenv(invocationsEnv))
+}
+
+// ProtocolLog returns the age plugin commands this Install recorded
+// ("recipient-v1 add-recipient", "identity-v1 add-identity", …).
+func ProtocolLog(t *testing.T) []string {
+	t.Helper()
+	return readLogLines(t, os.Getenv(protocolEnv))
+}
+
+func readLogLines(t *testing.T, p string) []string {
+	t.Helper()
 	if p == "" {
 		return nil
 	}
@@ -177,15 +195,45 @@ func runPlugin(name string) int {
 		return 1
 	}
 	p.HandleRecipient(func(data []byte) (age.Recipient, error) {
+		recordProtocol("add-recipient")
 		return fakeRecipient{name: name, mode: modeOf(data)}, nil
 	})
 	p.HandleIdentityAsRecipient(func(data []byte) (age.Recipient, error) {
+		recordProtocol("add-identity")
 		return fakeRecipient{name: name, mode: modeOf(data)}, nil
 	})
 	p.HandleIdentity(func(data []byte) (age.Identity, error) {
+		recordProtocol("add-identity")
 		return fakeIdentity{name: name, mode: modeOf(data), p: p}, nil
 	})
 	return p.Main()
+}
+
+func pluginState() string {
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "--age-plugin=") {
+			return strings.TrimPrefix(a, "--age-plugin=")
+		}
+	}
+	return ""
+}
+
+func recordProtocol(cmd string) {
+	p := os.Getenv(protocolEnv)
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	state := pluginState()
+	if state == "" {
+		_, _ = fmt.Fprintf(f, "%s\n", cmd)
+	} else {
+		_, _ = fmt.Fprintf(f, "%s %s\n", state, cmd)
+	}
+	_ = f.Close()
 }
 
 func modeOf(data []byte) Mode {

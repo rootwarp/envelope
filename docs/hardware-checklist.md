@@ -12,6 +12,12 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 5. `envelope recipient -identity bundle.txt` prints the recorded set, never `<identity-based recipient>`.
 
+6. Card-free split: with the key unplugged, `split` must still encrypt the payload and must stop at the pin unwrap with a card-required diagnosis; then plug in and count PIN prompts and touches.
+
+7. `split` a ≥ 1 MiB file at `(3,5)`, delete two shards, `restore`, `cmp` identical — on a generated-on-card key **and** an imported key.
+
+9. Backup proven: a `(3,5)` set split to `[YK1, YK2, paper]` restores from each of the three independently, with the other two absent.
+
 10. `restore -identity yk1.txt -identity yk2.txt` with only YK2 present must succeed and must not prompt for YK1's PIN; then swap the order and repeat.
 
 11. Replacement drill. Import the backed-up P-256 key into a second YubiKey, regenerate the stub, `envelope bind -replace-identity`, and restore an existing shard set with no re-encryption. Confirm the recipient string is byte-identical to the original.

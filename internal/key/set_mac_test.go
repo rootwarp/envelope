@@ -42,8 +42,12 @@ func TestLoadSetRecordsBundlePin(t *testing.T) {
 	if len(set.pin.recipients) != len(wantRec) {
 		t.Fatalf("recipients = %d, want %d", len(set.pin.recipients), len(wantRec))
 	}
+	gotRec := set.RecordedRecipients()
+	if len(gotRec) != len(wantRec) {
+		t.Fatalf("RecordedRecipients = %d, want %d", len(gotRec), len(wantRec))
+	}
 	for i := range wantRec {
-		if set.pin.recipients[i] != wantRec[i] {
+		if set.pin.recipients[i] != wantRec[i] || gotRec[i] != wantRec[i] {
 			t.Fatal("recorded recipients do not match the bundle")
 		}
 	}

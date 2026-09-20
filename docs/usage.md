@@ -472,6 +472,23 @@ existing shard set restores unchanged, with no re-encryption. The recipient
 string is byte-identical (it is the public key); the stub is not, because it
 embeds the device serial.
 
+### split with a bundle
+
+```sh
+envelope split -identity bundle.txt -in secret.bin -out shards/ -k 3 -n 5
+```
+
+- **Encryption does not need the card.** The payload and the manifest go to recorded recipient *strings*, which is pure software — no PC/SC at all. **The pin unwrap does**, and that is the only thing you are prompted for at `split`. With `PinPolicy::Once` + `TouchPolicy::Cached` that is one PIN and one touch for the whole split.
+- `-recipient` replaces the recorded set **for this split only** and never rewrites the bundle. Manifest verification still needs a bundle identity; the payload needs a member of the set you encrypted to. Those are two different questions.
+- A split to a single plugin recipient warns, before any plugin starts:
+
+  ```
+  only one recipient (age1…): if that key is lost, reset or replaced by a firmware recall, this payload is gone. `envelope bind -add-recipient` adds a recovery recipient, but only for future splits.
+  ```
+
+- Recipient-side `Wrap` still starts plugin processes: a split to one plugin recipient spawns two (payload and manifest). For PIV both are card-free. Envelope does not budget those, because nothing under `internal/` may assume that of an arbitrary plugin.
+- `-recipient` takes only a bech32 age recipient. There is no passphrase path, ever.
+
 #### Indirection (not the default)
 
 Someone who has decided rotation matters more than non-exportability can

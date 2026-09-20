@@ -45,7 +45,7 @@ func TestHelpMatchesContract(t *testing.T) {
 			name:     "split -h",
 			args:     []string{"split", "-h"},
 			contract: usageSplit,
-			flags:    []string{"-identity", "-in", "-out", "-k", "-n"},
+			flags:    []string{"-identity", "-recipient", "-in", "-out", "-k", "-n"},
 		},
 		{
 			name:     "restore -h",

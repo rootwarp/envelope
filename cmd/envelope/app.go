@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -65,6 +66,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				description: descriptionSplit,
 				flags: []cli.Flag{
 					pathFlag("identity", "identity `FILE` from keygen"),
+					optionalStringSliceFlag("recipient", "public age recipient"),
 					pathFlag("in", "input `FILE`"),
 					pathFlag("out", "output `DIR`"),
 					&cli.IntFlag{Name: "k", Value: defaultK, Usage: "shards needed to restore"},
@@ -77,12 +79,16 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 					}
 					_, err := pipeline.Split(ctx, pipeline.SplitOptions{
 						IdentityPath: c.String("identity"),
+						Recipients:   c.StringSlice("recipient"),
 						InPath:       c.String("in"),
 						OutDir:       c.String("out"),
 						K:            k,
 						N:            n,
 						Terminal:     testTerminal,
 					}, a.stderr)
+					if err != nil && errors.Is(err, pipeline.ErrBadRecipient) {
+						return usageFail(a.stderr, usageSplit, fmt.Errorf("-recipient: %w", err))
+					}
 					return err
 				},
 			}),
