@@ -79,35 +79,40 @@ func Create(path string) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := writeNew0600(path, []byte(id.age.String()+"\n")); err != nil {
+		return nil, err
+	}
+	return id, nil
+}
+
+// writeNew0600 is the keygen durability sequence: O_EXCL 0600, write, Sync,
+// Close, Chmod 0600, syncDir. ErrIdentityExists on an existing path.
+func writeNew0600(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return nil, ErrIdentityExists
+			return ErrIdentityExists
 		}
-		return nil, err
+		return err
 	}
-	_, werr := io.WriteString(f, id.age.String()+"\n")
-	if werr != nil {
+	if _, err := f.Write(data); err != nil {
 		f.Close()
-		return nil, werr
+		return err
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return nil, err
+		return err
 	}
 	if err := f.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	// os.WriteFile/O_CREATE supply a mode only at creation, so writing over a
 	// stale world-readable identity.txt would leave it world-readable. O_EXCL
 	// removes that case; keep both.
 	if err := os.Chmod(path, 0o600); err != nil {
-		return nil, err
+		return err
 	}
-	if err := syncDir(filepath.Dir(path)); err != nil {
-		return nil, err
-	}
-	return id, nil
+	return syncDir(filepath.Dir(path))
 }
 
 func syncDir(dir string) error {

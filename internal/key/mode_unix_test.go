@@ -31,6 +31,31 @@ func assertCreateMode600(t *testing.T) {
 	if _, err := Create(path); err != nil {
 		t.Fatal(err)
 	}
+	assertMode600(t, path)
+}
+
+func TestWriteNewModeUmask0022(t *testing.T) {
+	withUmask(t, 0o022)
+	assertWriteNewMode600(t)
+}
+
+func TestWriteNewModeUmask0077(t *testing.T) {
+	withUmask(t, 0o077)
+	assertWriteNewMode600(t)
+}
+
+func assertWriteNewMode600(t *testing.T) {
+	t.Helper()
+	b, _ := mustNativeBundle(t)
+	path := filepath.Join(t.TempDir(), "bundle.txt")
+	if err := WriteNew(path, b); err != nil {
+		t.Fatal(err)
+	}
+	assertMode600(t, path)
+}
+
+func assertMode600(t *testing.T, path string) {
+	t.Helper()
 	fi, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)

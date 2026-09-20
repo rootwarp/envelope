@@ -19,17 +19,19 @@ go build -o envelope ./cmd/envelope
 `-version` prints the Envelope build and the `age` and `reedsolomon` versions.
 `--help` prints help.
 
-## The three things you keep
+## The things you keep
 
 | Thing | What it is | If you lose it |
 |---|---|---|
-| Identity file | The only decryption key | **Everything is gone.** No recovery, no passphrase, no escrow. |
+| Identity file | The only decryption key (native `keygen` identity) | **Everything is gone.** No recovery, no passphrase, no escrow. |
+| Bundle | Hardware identity plus wrapped pin; see [The bundle](#the-bundle) | Every shard set is **unverifiable and unrestorable**, even with a working key. |
 | Shards | `shard-00` … `shard-(n-1)` | Fine, as long as `k` survive intact. |
 | `manifest.age` | Shard count, sizes, digests; encrypted and MAC'd to the identity | Restore refuses to run. Keep a copy next to **every** shard. |
 
-Back the identity up separately from the shards. Anyone holding the identity
-and `k` shards can restore; `(k, n)` is loss tolerance, not a secret-sharing
-threshold.
+Back the identity (or bundle) up separately from the shards. Anyone holding the
+identity and `k` shards can restore; `(k, n)` is loss tolerance, not a
+secret-sharing threshold. A hardware identity is two durable artifacts — the
+bundle and the recovery recipient's key material — not one identity file.
 
 ## 1. Create an identity
 
@@ -371,12 +373,37 @@ The string is public. Encrypting to it does not need the card. Mixing a
 hardware recipient with a paper (file-identity) recipient works: either
 identity alone can restore.
 
+### The bundle
+
+A hardware identity is stored as one small **bundle** file you back up. It
+holds identity lines, the recorded public recipient strings, a public
+`mac_key_id`, and a pin — the 32-byte seed, encrypted to those recipients. It
+holds no plaintext secret. A stolen bundle yields nothing, because the seed is
+encrypted to hardware.
+
+**Its loss makes every shard set unverifiable and therefore unrestorable even
+with a working key.** The bundle and the recovery recipient's key material are
+the two durable artifacts; losing the bundle is not the same as still having
+the card.
+
+The file is still a valid `age` identity file (`age -d -i bundle.txt` works):
+metadata lives on `#` lines, and the pin is base64, not age armor. `mac_key_id`
+is public metadata — 32 lowercase hex characters on the `envelope-mac-key-id`
+line — so you can read a backup and confirm it is the right one without the
+card. The seed is long-lived on purpose and is never regenerated: a silently
+new seed would look, to you, like every shard set you own had been forged.
+
 ## Troubleshooting
 
 | Message | Cause | Fix |
 |---|---|---|
 | `identity file already exists` | `keygen -out` points at an existing file | Choose another path; never overwrite a live identity |
 | `identity file is invalid` | Not an age identity file | Point `-identity` at the `keygen` output |
+| `identity bundle version is not supported` | The first non-empty line is not `# envelope-bundle: v1` | Use a v1 bundle; a newer format needs a newer Envelope |
+| `identity bundle has an unknown or malformed field` | An `# envelope-…` line is unknown or not `# envelope-<key>: <value>` | Restore a known-good copy of the bundle; do not hand-edit envelope fields |
+| `identity bundle exceeds size limit` | The file is larger than 64 KiB | Use another copy of the bundle; a real bundle is small |
+| `identity bundle requires at least one recipient` | The bundle would record no public recipient, so it could not split | Get the public recipient from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) and record it |
+| `identity bundle pin is corrupt` | The wrapped seed does not match this bundle's `mac_key_id` | Restore a known-good copy of the bundle; do not regenerate a seed |
 | `age plugin binary is not installed: age-plugin-…` | The plugin named by the identity is not on `PATH` | Install it with Homebrew, Nix, your distro package, or `cargo install`; confirm `age-plugin-<name>` is on `PATH` |
 | `age plugin failed: age-plugin-…` | The plugin refused the unwrap (no card, wrong card or slot, wrong PIN, blocked PIN, AEAD failure) | Plug in the right key, check the slot, retry with the correct PIN; a wrong PIN is fatal and is not retried |
 | `age plugin protocol error: age-plugin-…` | The plugin exited non-zero or broke the age plugin protocol | Reinstall the plugin from Homebrew, Nix, the distro package, or `cargo install`; confirm `age-plugin-<name> --version` runs |
