@@ -86,6 +86,17 @@ func diagnose(id *Identity, err error) error {
 	return err
 }
 
+// ResolvePlugin returns the absolute path of age-plugin-<name> as first on
+// PATH. execabs (blank-imported above) blocks a relative-directory hijack;
+// an absolute one is still possible, which is why the caller names this path
+// on stderr the first time a plugin would launch (NFR-YK-04).
+func ResolvePlugin(name string) (string, error) {
+	if name == "" {
+		return "", exec.ErrNotFound
+	}
+	return exec.LookPath("age-plugin-" + name)
+}
+
 func pluginProtocol(err error) bool {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {

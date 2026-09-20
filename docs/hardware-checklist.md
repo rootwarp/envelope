@@ -8,7 +8,11 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 12. `ykman piv reset` a spare key; `restore` and `verify` fail closed with a named diagnosis and write nothing.
 
+14. Run the full pipeline with stdin/stdout/stderr redirected and no controlling terminal via `setsid`/`nohup`: exits non-zero within seconds with `this identity needs a PIN and there is no terminal to ask on`, having written nothing.
+
 15. On a real terminal with stdin **and** stdout redirected, the PIN prompt still appears and is answerable.
+
+17. `AGEDEBUG=plugin` emits Envelope's warning before any plugin starts; confirm on a throwaway PIN that the PIN does appear on stderr.
 
 18. Over a marker-bearing input with a real PIN, grep every shard, every stream and every log for the marker and for the PIN.
 

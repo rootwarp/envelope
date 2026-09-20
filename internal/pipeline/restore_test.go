@@ -61,7 +61,7 @@ func TestRestoreWrongIdentity(t *testing.T) {
 	if _, err := key.Create(other); err != nil {
 		t.Fatal(err)
 	}
-	restore.IdentityPath = other
+	restore.IdentityPaths = []string{other}
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if err == nil {
@@ -285,9 +285,9 @@ func TestStaleManifestZeroMatch(t *testing.T) {
 
 	outPath := filepath.Join(t.TempDir(), "out.bin")
 	_, err = Restore(context.Background(), RestoreOptions{
-		IdentityPath: idPath,
-		InDirs:       []string{dirB},
-		OutPath:      outPath,
+		IdentityPaths: []string{idPath},
+		InDirs:        []string{dirB},
+		OutPath:       outPath,
 	}, io.Discard)
 	if !errors.Is(err, ErrStaleManifest) {
 		t.Fatalf("errors.Is(., ErrStaleManifest) = false")
@@ -637,7 +637,7 @@ func TestRestoreWrongIdentityEndToEnd(t *testing.T) {
 	if _, err := key.Create(other); err != nil {
 		t.Fatal(err)
 	}
-	restore.IdentityPath = other
+	restore.IdentityPaths = []string{other}
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if err == nil {
@@ -720,9 +720,9 @@ func TestForgottenCloseFailsRestore(t *testing.T) {
 
 	outPath := filepath.Join(t.TempDir(), "out.bin")
 	_, restoreErr := Restore(context.Background(), RestoreOptions{
-		IdentityPath: split.IdentityPath,
-		InDirs:       []string{outDir},
-		OutPath:      outPath,
+		IdentityPaths: []string{split.IdentityPath},
+		InDirs:        []string{outDir},
+		OutPath:       outPath,
 	}, io.Discard)
 
 	t.Run("restore returns an error", func(t *testing.T) {
@@ -761,7 +761,7 @@ func TestRestoreMarkerNeverOnDiskOnFailure(t *testing.T) {
 				if _, err := key.Create(other); err != nil {
 					t.Fatal(err)
 				}
-				restore.IdentityPath = other
+				restore.IdentityPaths = []string{other}
 			},
 		},
 		{
@@ -821,9 +821,9 @@ func splitSized(t *testing.T, size int) (RestoreOptions, SplitOptions, []byte) {
 		t.Fatal(err)
 	}
 	return RestoreOptions{
-		IdentityPath: split.IdentityPath,
-		InDirs:       []string{outDir},
-		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+		IdentityPaths: []string{split.IdentityPath},
+		InDirs:        []string{outDir},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 	}, split, want
 }
 
@@ -876,9 +876,9 @@ func splitFixture(t *testing.T) (RestoreOptions, SplitOptions) {
 		t.Fatal(err)
 	}
 	return RestoreOptions{
-		IdentityPath: split.IdentityPath,
-		InDirs:       []string{outDir},
-		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+		IdentityPaths: []string{split.IdentityPath},
+		InDirs:        []string{outDir},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 	}, split
 }
 
@@ -956,9 +956,9 @@ func splitMarkedRestore(t *testing.T) (RestoreOptions, []byte) {
 		t.Fatal(err)
 	}
 	return RestoreOptions{
-		IdentityPath: split.IdentityPath,
-		InDirs:       []string{outDir},
-		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+		IdentityPaths: []string{split.IdentityPath},
+		InDirs:        []string{outDir},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 	}, marker
 }
 

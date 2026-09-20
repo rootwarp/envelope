@@ -21,6 +21,7 @@ type SplitOptions struct {
 	InPath       string
 	OutDir       string
 	K, N         int
+	Terminal     Terminal
 }
 
 // SplitReport carries counts, indices and paths only. No field may ever hold

@@ -15,6 +15,9 @@ const (
 
 	defaultK = 3
 	defaultN = 5
+
+	// AGEDEBUG=plugin tees both protocol directions to stderr, including any PIN.
+	ageDebugPluginWarning = "AGEDEBUG=plugin is set; this is unsafe with a real secret because it writes the PIN to stderr"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -36,6 +39,10 @@ func runErr(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	// -version is a flag, not a subcommand; branch before dispatch (FR-30, §3.1).
 	if isVersionArg(args) {
 		return printVersion(stdout)
+	}
+	// Written through the injected writer, never the process streams (FR-35).
+	if os.Getenv("AGEDEBUG") == "plugin" {
+		_, _ = io.WriteString(stderr, ageDebugPluginWarning+"\n")
 	}
 	return newApp(stdout, stderr).Run(ctx, append([]string{"envelope"}, args...))
 }

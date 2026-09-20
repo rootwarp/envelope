@@ -122,8 +122,8 @@ func assertVerifySlotClasses(t *testing.T, rrep *RestoreReport, vrep *VerifyRepo
 func verifyDirs(t *testing.T, restore RestoreOptions, status io.Writer) (*VerifyReport, error) {
 	t.Helper()
 	return Verify(context.Background(), VerifyOptions{
-		IdentityPath: restore.IdentityPath,
-		InDirs:       restore.InDirs,
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        restore.InDirs,
 	}, status)
 }
 

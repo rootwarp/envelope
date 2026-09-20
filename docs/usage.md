@@ -98,6 +98,7 @@ Point `-in` at a directory that holds at least `k` shards and a `manifest.age`:
 envelope restore -identity identity.txt -in shards/ -out secret.bin
 ```
 
+`-identity` may be repeated. Identities are tried in the order given.
 `-in` may be repeated. Directories are searched in the order given; the first
 usable copy of each shard wins. A `manifest.age` is needed in at least one of
 them. Restore from the disks the shards already live on — there is no gather
@@ -109,7 +110,7 @@ envelope restore -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c -out se
 
 | Flag | Required | Meaning |
 |---|---|---|
-| `-identity` | yes | The identity used for `split` |
+| `-identity` | yes | The identity used for `split`; repeatable. Tried in the order given |
 | `-in` | yes | Directory of shards; repeatable. A manifest is needed in at least one |
 | `-out` | yes | Where to write the restored file |
 
@@ -161,6 +162,7 @@ fall back to a weaker call.
 envelope verify -identity identity.txt -in shards/
 ```
 
+`-identity` may be repeated. Identities are tried in the order given.
 `-in` may be repeated. Directories are searched in the order given; the first
 usable copy of each shard wins. A `manifest.age` is needed in at least one of
 them:
@@ -176,7 +178,7 @@ answers.
 
 | Flag | Required | Meaning |
 |---|---|---|
-| `-identity` | yes | The identity used for `split` |
+| `-identity` | yes | The identity used for `split`; repeatable. Tried in the order given |
 | `-in` | yes | Directory of shards; repeatable. A manifest is needed in at least one |
 
 The identity is required because the manifest is encrypted. Verify writes
@@ -283,6 +285,12 @@ trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
 key material. It is a library debug switch, not an Envelope configuration
 source.
 
+If `AGEDEBUG=plugin` is set when the process starts, Envelope prints one
+warning line on stderr before any command runs, then the age plugin client
+tees both protocol directions to stderr. That includes any PIN, base64-encoded
+in an `ok` stanza. It is a debug switch, not an Envelope configuration source,
+and it is **unsafe with a real secret**.
+
 ## Hardware identities
 
 An `age-plugin-*` identity is a line `AGE-PLUGIN-<NAME>-1…` that names an
@@ -315,11 +323,19 @@ Linux and BSD need `pcscd` installed and running. macOS needs nothing extra.
 On WSL, put the Windows-host plugin binary on the WSL `PATH`.
 
 The plugin inherits Envelope's entire environment. Envelope execs whichever
-`age-plugin-<name>` is first on `PATH`.
+`age-plugin-<name>` is first on `PATH`. The resolved absolute path is printed
+on stderr the first time one launches, so a surprising binary is visible
+rather than silent.
 
 ## Prompts and touches
 
 Hardware identities prompt on the terminal (`/dev/tty`), never on stdout.
+
+A run with no controlling terminal and an interactive identity is refused
+before any plugin starts, with `this identity needs a PIN and there is no
+terminal to ask on`, and writes nothing. A programmatic cancellation cannot
+interrupt a blocked plugin, so refusing early is the guarantee. Envelope never
+falls back to stdin, which may be the payload.
 
 There is **no touch prompt for any key**, generated or imported. After five
 seconds Envelope prints a wait line (`waiting on age-plugin-<name>…`). Touch
@@ -389,6 +405,6 @@ identity alone can restore.
 | `unexpected positional argument` | Extra argument after the flags | Remove it |
 | `did you mean "…"?` | Command name is close to a known command | Use the suggested command |
 
-Interactive identities need a terminal; with none, the run is refused before any plugin starts.
+Interactive identities need a terminal; with none, the run is refused before any plugin starts, with `this identity needs a PIN and there is no terminal to ask on`.
 
 A failed restore never leaves a partial output file behind.

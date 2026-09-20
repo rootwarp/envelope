@@ -4,7 +4,10 @@ import (
 	"github.com/rootwarp/envelope/internal/key"
 )
 
-type RecipientOptions struct{ IdentityPath string }
+type RecipientOptions struct {
+	IdentityPath string
+	Terminal     Terminal
+}
 
 func Recipient(opts RecipientOptions) (string, error) {
 	id, err := key.Load(opts.IdentityPath)

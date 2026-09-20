@@ -8,6 +8,7 @@ import (
 
 type KeygenOptions struct {
 	IdentityPath string
+	Terminal     Terminal
 }
 
 func Keygen(opts KeygenOptions, status io.Writer) error {

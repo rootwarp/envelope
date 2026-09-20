@@ -17,9 +17,10 @@ import (
 )
 
 type RestoreOptions struct {
-	IdentityPath string
-	InDirs       []string
-	OutPath      string
+	IdentityPaths []string
+	InDirs        []string
+	OutPath       string
+	Terminal      Terminal
 }
 
 // RestoreReport carries counts, indices and paths only. No field may ever hold
@@ -43,7 +44,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	set, err := openShardSet(ctx, opts.IdentityPath, opts.InDirs, false, status)
+	set, err := openShardSet(ctx, opts.IdentityPaths, opts.InDirs, false, status, opts.Terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,7 @@ var (
 	_ manifest.MACKeySource = (*key.Set)(nil)
 )
 
-func openShardSet(ctx context.Context, identityPath string, inDirs []string, scanAll bool, status io.Writer) (*shardSet, error) {
+func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, scanAll bool, status io.Writer, term Terminal) (*shardSet, error) {
 	if len(inDirs) == 0 {
 		return nil, errors.New("at least one -in directory is required")
 	}
@@ -122,11 +123,19 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 		return nil, cands[0].err
 	}
 
-	// Single-file path: repeatable -identity is YK-10. nil terminal is the
-	// v1 native case; a plugin identity fails closed at Unwrap precheck.
-	keys, err := key.LoadSet([]string{identityPath}, nil)
+	src := terminalSource(term)
+	keys, err := key.LoadSet(identityPaths, src)
 	if err != nil {
 		return nil, err
+	}
+	// Plugin-only: refuse with no TTY before any age-plugin-* process (FR-YK-13).
+	// A native-with-scalar set never opens the terminal here (YK-08 decrypts natives first).
+	if err := refuseInteractiveWithoutTerminal(keys, src); err != nil {
+		keys.Zero()
+		return nil, err
+	}
+	if nativeScalar(keys) == nil {
+		noteFirstPlugin(keys, status)
 	}
 	macKey, err := keys.KeyFor(1, 0)
 	if err != nil {
@@ -141,7 +150,7 @@ func openShardSet(ctx context.Context, identityPath string, inDirs []string, sca
 		}
 	}()
 
-	m, err := chooseManifest(cands, keys, identityPath, multi, status)
+	m, err := chooseManifest(cands, keys, identitySource(keys, identityPaths), multi, status)
 	if err != nil {
 		return nil, err
 	}

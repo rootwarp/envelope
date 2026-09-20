@@ -17,6 +17,9 @@ func TestMain(m *testing.M) {
 		return
 	}
 	cli.OsExiter = func(code int) { panic(fmt.Sprintf("urfave reached os.Exit(%d)", code)) }
+	// Inherited AGEDEBUG=plugin would write a warning on every run() stderr,
+	// including help. Tests that need the warning call t.Setenv themselves.
+	_ = os.Setenv("AGEDEBUG", "")
 	os.Exit(m.Run())
 }
 

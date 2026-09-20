@@ -30,6 +30,10 @@ const (
 	labelExclusive = "envelope-exclusive"
 	// DebugSecret is a secret-looking token ModeDebugFooter appends after its URL footer.
 	DebugSecret = "file-key=00envelope-secret-body"
+
+	// invocationsEnv is the absolute path of the file Dispatch appends to.
+	// Install sets it so a re-exec'd plugin records itself; production never sets it.
+	invocationsEnv = "ENVELOPE_FAKEPLUGIN_INVOCATIONS"
 )
 
 // link is os.Link; tests replace it to force the copy fallback.
@@ -56,6 +60,7 @@ func Dispatch() bool {
 	if !strings.HasPrefix(base, pluginPrefix) {
 		return false
 	}
+	recordInvocation()
 	name := strings.TrimPrefix(base, pluginPrefix)
 	if name == "" {
 		return false
@@ -99,7 +104,50 @@ func Install(t *testing.T, name string) string {
 	t.Setenv("PATH", dir)
 	// AGEDEBUG=plugin tees both protocol directions to stderr, including PIN and file key.
 	t.Setenv("AGEDEBUG", "")
+	logPath := filepath.Join(dir, "invocations.log")
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(invocationsEnv, logPath)
 	return dir
+}
+
+func recordInvocation() {
+	p := os.Getenv(invocationsEnv)
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(f, "%s\n", os.Args[0])
+	_ = f.Close()
+}
+
+// Invocations returns the absolute plugin paths Dispatch recorded for this
+// Install. Empty when no age-plugin-* process started.
+func Invocations(t *testing.T) []string {
+	t.Helper()
+	p := os.Getenv(invocationsEnv)
+	if p == "" {
+		return nil
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // Identity encodes m in the bech32 payload of an AGE-PLUGIN-<NAME>-1… string.

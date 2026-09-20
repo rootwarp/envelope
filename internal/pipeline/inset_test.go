@@ -258,7 +258,7 @@ func TestResealedManifestIsNotAConflict(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := split.OutDir
 	dirB := t.TempDir()
-	reseal(t, restore.IdentityPath, filepath.Join(dirA, "manifest.age"), filepath.Join(dirB, "manifest.age"))
+	reseal(t, restore.IdentityPaths[0], filepath.Join(dirA, "manifest.age"), filepath.Join(dirB, "manifest.age"))
 
 	want, err := os.ReadFile(split.InPath)
 	if err != nil {
@@ -288,9 +288,9 @@ func TestConflictingManifests(t *testing.T) {
 	dirA := split.OutDir
 	dirB := t.TempDir()
 	src := filepath.Join(dirA, "manifest.age")
-	reseal(t, restore.IdentityPath, src, src)
+	reseal(t, restore.IdentityPaths[0], src, src)
 
-	id, macKey, m := openManifest(t, restore.IdentityPath, src)
+	id, macKey, m := openManifest(t, restore.IdentityPaths[0], src)
 	defer id.Zero()
 	defer clear(macKey)
 	if len(m.Digests) == 0 || len(m.Digests[0]) == 0 {
@@ -330,9 +330,9 @@ func TestConflictingManifests(t *testing.T) {
 // FR-MD-03 I1: blobs are read before key.Load.
 func TestNoManifestPrecedesIdentityLoad(t *testing.T) {
 	_, err := Restore(context.Background(), RestoreOptions{
-		IdentityPath: filepath.Join(t.TempDir(), "missing-identity.txt"),
-		InDirs:       []string{t.TempDir()},
-		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+		IdentityPaths: []string{filepath.Join(t.TempDir(), "missing-identity.txt")},
+		InDirs:        []string{t.TempDir()},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 	}, io.Discard)
 	if !errors.Is(err, ErrNoManifest) {
 		t.Fatalf("errors.Is(., ErrNoManifest) = false")
@@ -345,9 +345,9 @@ func TestNoManifestWording(t *testing.T) {
 	b := t.TempDir()
 	out := filepath.Join(t.TempDir(), "out.bin")
 	opts := RestoreOptions{
-		IdentityPath: filepath.Join(t.TempDir(), "missing-identity.txt"),
-		InDirs:       []string{a},
-		OutPath:      out,
+		IdentityPaths: []string{filepath.Join(t.TempDir(), "missing-identity.txt")},
+		InDirs:        []string{a},
+		OutPath:       out,
 	}
 
 	_, err := Restore(context.Background(), opts, io.Discard)
@@ -414,8 +414,8 @@ func TestForeignManifestNamesItsOwnPath(t *testing.T) {
 	if !strings.Contains(note, wantNote) {
 		t.Fatalf("status missing %q; len=%d", wantNote, status.Len())
 	}
-	if strings.Contains(note, restore.IdentityPath) {
-		t.Fatalf("status names identity path %s; len=%d", restore.IdentityPath, status.Len())
+	if strings.Contains(note, restore.IdentityPaths[0]) {
+		t.Fatalf("status names identity path %s; len=%d", restore.IdentityPaths[0], status.Len())
 	}
 }
 
@@ -426,7 +426,7 @@ func TestFailingManifestNoteIsNotFatal(t *testing.T) {
 	dirB := t.TempDir()
 	src := filepath.Join(dirA, "manifest.age")
 
-	id, macKey, m := openManifest(t, restore.IdentityPath, src)
+	id, macKey, m := openManifest(t, restore.IdentityPaths[0], src)
 	defer id.Zero()
 	clear(macKey)
 	if len(m.MAC) == 0 {
@@ -485,7 +485,7 @@ func TestWrongIdentityBuffersNoNotes(t *testing.T) {
 
 	var status bytes.Buffer
 	opts := restore
-	opts.IdentityPath = other
+	opts.IdentityPaths = []string{other}
 	opts.InDirs = dirs
 	_, err := Restore(context.Background(), opts, &status)
 	want := crypt.ErrWrongIdentity.Error() + ": " + other

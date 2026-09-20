@@ -11,6 +11,10 @@ import (
 	"github.com/rootwarp/envelope/internal/pipeline"
 )
 
+// testTerminal is injected by tests. Production leaves it nil so pipeline
+// opens /dev/tty on demand. cmd/envelope must not import internal/key (D7).
+var testTerminal pipeline.Terminal
+
 // app is one run's writers. Closures capture it so nothing lives at package scope.
 type app struct{ stdout, stderr io.Writer }
 
@@ -50,7 +54,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				description: descriptionKeygen,
 				flags:       []cli.Flag{pathFlag("out", "identity `FILE`")},
 				run: func(_ context.Context, c *cli.Command) error {
-					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out")}, a.stderr)
+					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out"), Terminal: testTerminal}, a.stderr)
 				},
 			}),
 			a.newCommand(cmdSpec{
@@ -76,6 +80,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 						OutDir:       c.String("out"),
 						K:            k,
 						N:            n,
+						Terminal:     testTerminal,
 					}, a.stderr)
 					return err
 				},
@@ -86,15 +91,16 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				contract:    usageRestore,
 				description: descriptionRestore,
 				flags: []cli.Flag{
-					pathFlag("identity", "identity `FILE` from keygen"),
+					pathSliceFlag("identity", "identity `FILE` from keygen"),
 					pathSliceFlag("in", "shard `DIR`"),
 					pathFlag("out", "output `FILE`"),
 				},
 				run: func(ctx context.Context, c *cli.Command) error {
 					_, err := pipeline.Restore(ctx, pipeline.RestoreOptions{
-						IdentityPath: c.String("identity"),
-						InDirs:       c.StringSlice("in"),
-						OutPath:      c.String("out"),
+						IdentityPaths: c.StringSlice("identity"),
+						InDirs:        c.StringSlice("in"),
+						OutPath:       c.String("out"),
+						Terminal:      testTerminal,
 					}, a.stderr)
 					return err
 				},

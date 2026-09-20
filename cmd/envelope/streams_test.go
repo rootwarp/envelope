@@ -270,8 +270,9 @@ func mustSplitFixture(t *testing.T) (id, shards, out string) {
 	return id, shards, out
 }
 
-// childEnv copies the process environment without the two library debug
-// switches that write around injected writers (O19).
+// childEnv copies the process environment without library debug switches
+// that write around injected writers (O19). PATH is kept so an injected
+// fake-plugin directory reaches an exec'd child.
 func childEnv() []string {
 	src := os.Environ()
 	env := make([]string, 0, len(src))

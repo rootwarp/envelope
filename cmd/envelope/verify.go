@@ -17,13 +17,14 @@ func (a *app) verifyCommand() *cli.Command {
 		contract:    usageVerify,
 		description: descriptionVerify,
 		flags: []cli.Flag{
-			pathFlag("identity", "identity `FILE` from keygen"),
+			pathSliceFlag("identity", "identity `FILE` from keygen"),
 			pathSliceFlag("in", "shard `DIR`"),
 		},
 		run: func(ctx context.Context, c *cli.Command) error {
 			rep, err := pipeline.Verify(ctx, pipeline.VerifyOptions{
-				IdentityPath: c.String("identity"),
-				InDirs:       c.StringSlice("in"),
+				IdentityPaths: c.StringSlice("identity"),
+				InDirs:        c.StringSlice("in"),
+				Terminal:      testTerminal,
 			}, a.stderr)
 			if rep != nil {
 				writeVerifyReport(a.stdout, rep) // first, even when err != nil

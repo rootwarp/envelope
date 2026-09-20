@@ -112,8 +112,8 @@ func TestVerifyResultClasses(t *testing.T) {
 			restore, input := tc.fixture(t)
 			var status bytes.Buffer
 			rep, err := Verify(context.Background(), VerifyOptions{
-				IdentityPath: restore.IdentityPath,
-				InDirs:       []string{restore.InDirs[0]},
+				IdentityPaths: restore.IdentityPaths,
+				InDirs:        []string{restore.InDirs[0]},
 			}, &status)
 			if rep == nil {
 				t.Fatal("report is nil")
@@ -191,8 +191,8 @@ func TestVerifyPayloadTamper(t *testing.T) {
 	t.Cleanup(func() { testAtJoin = nil })
 
 	rep, err := Verify(context.Background(), VerifyOptions{
-		IdentityPath: restore.IdentityPath,
-		InDirs:       []string{restore.InDirs[0]},
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        []string{restore.InDirs[0]},
 	}, nil)
 	if rep == nil {
 		t.Fatal("report is nil")
@@ -257,8 +257,8 @@ func TestVerifyWritesNothing(t *testing.T) {
 			restore := tc.fixture(t)
 			before := snapshotTree(t, root)
 			_, err := Verify(context.Background(), VerifyOptions{
-				IdentityPath: restore.IdentityPath,
-				InDirs:       []string{restore.InDirs[0]},
+				IdentityPaths: restore.IdentityPaths,
+				InDirs:        []string{restore.InDirs[0]},
 			}, io.Discard)
 			tc.check(t, err)
 			after := snapshotTree(t, root)
@@ -295,8 +295,8 @@ func TestVerifyWritesNothing(t *testing.T) {
 
 		before := snapshotTree(t, root)
 		rep, err := Verify(context.Background(), VerifyOptions{
-			IdentityPath: restore.IdentityPath,
-			InDirs:       []string{restore.InDirs[0]},
+			IdentityPaths: restore.IdentityPaths,
+			InDirs:        []string{restore.InDirs[0]},
 		}, io.Discard)
 		if err != nil {
 			t.Fatal(err)
@@ -343,13 +343,13 @@ func TestVerifyStaleManifest(t *testing.T) {
 	}
 
 	restore := RestoreOptions{
-		IdentityPath: idPath,
-		InDirs:       []string{dirB},
-		OutPath:      filepath.Join(t.TempDir(), "out.bin"),
+		IdentityPaths: []string{idPath},
+		InDirs:        []string{dirB},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 	}
 	rep, verr := Verify(context.Background(), VerifyOptions{
-		IdentityPath: restore.IdentityPath,
-		InDirs:       []string{restore.InDirs[0]},
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep == nil {
 		t.Fatal("report is nil")
@@ -396,7 +396,7 @@ func TestVerifyMatchesRestoreDiagnostics(t *testing.T) {
 		if _, err := key.Create(other); err != nil {
 			t.Fatal(err)
 		}
-		restore.IdentityPath = other
+		restore.IdentityPaths = []string{other}
 		assertVerifyMatchesRestoreErr(t, restore)
 	})
 
@@ -430,8 +430,8 @@ func TestVerifyMatchesRestoreDiagnostics(t *testing.T) {
 		var rstatus, vstatus bytes.Buffer
 		rrep, rerr := Restore(context.Background(), restore, &rstatus)
 		vrep, verr := Verify(context.Background(), VerifyOptions{
-			IdentityPath: restore.IdentityPath,
-			InDirs:       []string{restore.InDirs[0]},
+			IdentityPaths: restore.IdentityPaths,
+			InDirs:        []string{restore.InDirs[0]},
 		}, &vstatus)
 
 		// Phase 1 loadShard treats open errors other than ErrNotExist as
@@ -480,8 +480,8 @@ func TestVerifyCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	rep, err := Verify(ctx, VerifyOptions{
-		IdentityPath: restore.IdentityPath,
-		InDirs:       []string{restore.InDirs[0]},
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep != nil {
 		t.Fatal("report is not nil")
@@ -498,8 +498,8 @@ func assertVerifyMatchesRestoreErr(t *testing.T, restore RestoreOptions) {
 	restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
 	_, rerr := Restore(context.Background(), restore, io.Discard)
 	rep, verr := Verify(context.Background(), VerifyOptions{
-		IdentityPath: restore.IdentityPath,
-		InDirs:       []string{restore.InDirs[0]},
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        []string{restore.InDirs[0]},
 	}, io.Discard)
 	if rep != nil {
 		t.Fatal("report is not nil")

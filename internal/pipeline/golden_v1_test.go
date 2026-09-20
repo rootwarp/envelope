@@ -47,9 +47,9 @@ func TestGoldenV1ShardSet(t *testing.T) {
 
 	outPath := filepath.Join(t.TempDir(), "out.bin")
 	rep, err := Restore(context.Background(), RestoreOptions{
-		IdentityPath: idPath,
-		InDirs:       []string{inDir},
-		OutPath:      outPath,
+		IdentityPaths: []string{idPath},
+		InDirs:        []string{inDir},
+		OutPath:       outPath,
 	}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -66,8 +66,8 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	}
 
 	vrep, err := Verify(context.Background(), VerifyOptions{
-		IdentityPath: idPath,
-		InDirs:       []string{inDir},
+		IdentityPaths: []string{idPath},
+		InDirs:        []string{inDir},
 	}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
