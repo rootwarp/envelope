@@ -283,6 +283,34 @@ trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
 key material. It is a library debug switch, not an Envelope configuration
 source.
 
+## Prompts and touches
+
+Hardware identities prompt on the terminal (`/dev/tty`), never on stdout.
+
+There is **no touch prompt for any key**, generated or imported. After five
+seconds Envelope prints a wait line (`waiting on age-plugin-<name>…`). Touch
+the key when you see it; that wait line is the only indication.
+
+If the plugin cannot open the card it asks you to insert it. While another
+identity is still untried, Envelope offers skip and defaults to skipping so
+the next identity can run. On the last identity it presents the insert prompt
+and waits. Envelope answers "plugged in" at most three times, then gives up
+with `gave up waiting for age-plugin-<name> after 3 attempts` and tries any
+remaining identities. That identity is skipped, not treated as a fatal error.
+
+For fewer prompts, create or import the slot with `PinPolicy::Once` and
+`TouchPolicy::Cached`. The policy must be set at creation or import: changing
+it later has **no effect on existing slots** (age-plugin-yubikey
+[issue #107](https://github.com/str4d/age-plugin-yubikey/issues/107)). An
+imported key **always** prompts for a PIN, because the plugin can read neither
+policy from an imported slot — so the recoverable configuration is the noisier
+one.
+
+Two caveats on those counts: `PinPolicy::Once`'s cached-PIN probe does not
+work on the YubiKey 4 series, and `TouchPolicy::Cached` is a 15-second
+**wall-clock** window, so reading cold USB media between two invocations can
+cost a second touch.
+
 ## Troubleshooting
 
 | Message | Cause | Fix |

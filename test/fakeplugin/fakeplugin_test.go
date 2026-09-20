@@ -41,8 +41,8 @@ func TestDispatchNoOp(t *testing.T) {
 }
 
 func TestFakePINLength(t *testing.T) {
-	if len(fakePIN) < 6 {
-		t.Fatalf("fakePIN is %d bytes; a RequestValue shorter than 6 would spin the real plugin's PIN loop", len(fakePIN))
+	if len(PIN) < 6 {
+		t.Fatalf("PIN is %d bytes; a RequestValue shorter than 6 would spin the real plugin's PIN loop", len(PIN))
 	}
 }
 
@@ -149,7 +149,7 @@ func testModeFatal(t *testing.T, name string) {
 
 func testModePIN(t *testing.T, name string) {
 	t.Helper()
-	rec := &recordingUI{pin: fakePIN}
+	rec := &recordingUI{pin: PIN}
 	ct := encryptTo(t, recipient(t, name, ModeOK, rec.ui()))
 	got, err := decryptWith(ct, identity(t, name, ModePIN, rec.ui()))
 	if err != nil {
@@ -177,7 +177,7 @@ func testModePIN(t *testing.T, name string) {
 
 func testModeWrongPIN(t *testing.T, name string) {
 	t.Helper()
-	rec := &recordingUI{pin: fakePIN}
+	rec := &recordingUI{pin: PIN}
 	ct := encryptTo(t, recipient(t, name, ModeOK, rec.ui()))
 	_, err := decryptWith(ct, identity(t, name, ModeWrongPIN, rec.ui()))
 	if err == nil {

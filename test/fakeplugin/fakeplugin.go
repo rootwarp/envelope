@@ -25,8 +25,8 @@ const (
 	garbageName  = "envgarbage"
 	garbageExit  = 9
 	pluginPrefix = "age-plugin-"
-	// fakePIN is ≥ 6 bytes: a shorter constant would spin the real plugin's PIN loop.
-	fakePIN        = "424242"
+	// PIN is ≥ 6 bytes: a shorter constant would spin the real plugin's PIN loop.
+	PIN            = "424242"
 	labelExclusive = "envelope-exclusive"
 )
 
@@ -207,7 +207,7 @@ func (i fakeIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if got != fakePIN {
+		if got != PIN {
 			return nil, errors.New("invalid PIN")
 		}
 	case ModeWrongPIN:
