@@ -283,6 +283,32 @@ trace lines to stderr. The traces carry paths and `k`/`n`, never payload or
 key material. It is a library debug switch, not an Envelope configuration
 source.
 
+## Hardware identities
+
+An `age-plugin-*` identity is a line `AGE-PLUGIN-<NAME>-1…` that names an
+external plugin binary (`age-plugin-<name>` on `PATH`). Envelope execs that
+binary when it needs to unwrap a file; it never holds the private key.
+
+Envelope never creates hardware keys. Generate or import them with the plugin
+itself (`age-plugin-yubikey --generate`) or with `ykman piv keys import`, then
+pass the identity file the plugin prints as `-identity`.
+
+Any `age-plugin-*` works. YubiKey is the documented example, not a special case
+in the tool.
+
+### Install the plugin
+
+Install `age-plugin-yubikey` from Homebrew, Nix, your distro package, or
+`cargo install`. Do **not** send Linux operators to the v0.5.1 GitHub release
+assets: that release ships darwin (arm64 and x86_64) and windows only, and has
+**no Linux artifact**.
+
+Linux and BSD need `pcscd` installed and running. macOS needs nothing extra.
+On WSL, put the Windows-host plugin binary on the WSL `PATH`.
+
+The plugin inherits Envelope's entire environment. Envelope execs whichever
+`age-plugin-<name>` is first on `PATH`.
+
 ## Prompts and touches
 
 Hardware identities prompt on the terminal (`/dev/tty`), never on stdout.
@@ -327,6 +353,12 @@ identity alone can restore.
 |---|---|---|
 | `identity file already exists` | `keygen -out` points at an existing file | Choose another path; never overwrite a live identity |
 | `identity file is invalid` | Not an age identity file | Point `-identity` at the `keygen` output |
+| `age plugin binary is not installed: age-plugin-…` | The plugin named by the identity is not on `PATH` | Install it with Homebrew, Nix, your distro package, or `cargo install`; confirm `age-plugin-<name>` is on `PATH` |
+| `age plugin failed: age-plugin-…` | The plugin refused the unwrap (no card, wrong card or slot, wrong PIN, blocked PIN, AEAD failure) | Plug in the right key, check the slot, retry with the correct PIN; a wrong PIN is fatal and is not retried |
+| `age plugin protocol error: age-plugin-…` | The plugin exited non-zero or broke the age plugin protocol | Reinstall the plugin from Homebrew, Nix, the distro package, or `cargo install`; confirm `age-plugin-<name> --version` runs |
+| `algorithm error` from `age-plugin-yubikey --list` / `--generate` / `--identity` | A PIV slot (any slot the plugin enumerates) holds a key with an unsupported algorithm. Decryption of existing files still works; setup breaks. [age-plugin-yubikey#241](https://github.com/str4d/age-plugin-yubikey/issues/241) on v0.5.1 | Use a slot the plugin supports, or retire the offending slot key; do not treat this as an Envelope decrypt failure |
+| `Could not open YubiKey` / exclusive-access errors while `yubikey-agent` is running | `yubikey-agent` holds exclusive PC/SC access to the card. [age-plugin-yubikey#136](https://github.com/str4d/age-plugin-yubikey/issues/136) | Stop `yubikey-agent` (and any other exclusive PC/SC client) before Envelope |
+| Plugin sees Envelope's whole environment | `cmd.Env` is unset, so the child inherits every variable Envelope has, including anything a wrapper exported | Treat the plugin process as Envelope-equivalent; do not rely on hiding secrets from it by environment |
 | `output directory is not empty: …` | `split -out` has files in it | Use a new or empty directory |
 | `k must be at least 1` / `n must be greater than k` / `n must not exceed 256` | Invalid `(k, n)` | Pick `1 ≤ k < n ≤ 256` |
 | `no manifest.age in the shard directory: …` | `manifest.age` wasn't copied into `-in` | Copy any surviving copy of the manifest in |

@@ -135,6 +135,7 @@ func TestManifestMACKeyGoldenVector(t *testing.T) {
 
 	var id Identity
 	copy(id.scalar[:], scalar)
+	id.hasScalar = true
 	got, err := id.ManifestMACKey()
 	if err != nil {
 		t.Fatal(err)

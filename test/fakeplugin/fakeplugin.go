@@ -28,6 +28,8 @@ const (
 	// PIN is ≥ 6 bytes: a shorter constant would spin the real plugin's PIN loop.
 	PIN            = "424242"
 	labelExclusive = "envelope-exclusive"
+	// DebugSecret is a secret-looking token ModeDebugFooter appends after its URL footer.
+	DebugSecret = "file-key=00envelope-secret-body"
 )
 
 // link is os.Link; tests replace it to force the copy fallback.
@@ -44,6 +46,7 @@ const (
 	ModeInsertForever          // Confirm loop until the client answers no
 	ModeSlowTouch              // sleeps 6 s so WaitTimer fires
 	ModeLabels                 // RecipientWithLabels; refuses to mix with unlabeled recipients
+	ModeDebugFooter            // error stanza: multi-line Debug footer with URL
 )
 
 // Dispatch returns false unless argv[0] is age-plugin-<name>. When it is, it
@@ -215,6 +218,8 @@ func (i fakeIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 			return nil, err
 		}
 		return nil, errors.New("incorrect PIN for this identity\n2 tries remaining")
+	case ModeDebugFooter:
+		return nil, errors.New("incorrect PIN for this identity\n\n[please report this bug at https://example.invalid/issues]\n" + DebugSecret)
 	case ModeInsertForever:
 		for {
 			yes, err := i.p.Confirm("insert the card", "plugged in", "skip")

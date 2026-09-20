@@ -1,4 +1,10 @@
-// Package key generates, writes, and loads age X25519 identities.
+// Package key generates, writes, and loads age identities.
+//
+// Load is the Phase 1 loader: exactly one X25519 identity. LoadSet pre-scans
+// each file, routes lines starting with PluginPrefix to plugin.NewIdentity,
+// and hands the remainder to age.ParseIdentities in one call. age's parse
+// error quotes the offending line, so neither that error nor a plugin parse
+// error is ever wrapped or returned.
 package key
 
 import (
@@ -20,19 +26,43 @@ import (
 )
 
 const (
-	HRP       = "AGE-SECRET-KEY-" // compared case-sensitively, as age does
-	ScalarLen = 32
-	MACKeyLen = 32
+	HRP          = "AGE-SECRET-KEY-" // compared case-sensitively, as age does
+	PluginPrefix = "AGE-PLUGIN-"     // case-sensitive, as plugin.ParseIdentity's HRP check is
+	ScalarLen    = 32
+	MACKeyLen    = 32
 
 	macSalt = "envelope"
 	macInfo = "envelope v1 manifest mac"
 )
 
-// Identity is the only holder of the X25519 scalar in the program.
+// Kind is what an identity or recipient is. It is the only property of a key
+// that leaves this package, and nothing outside branches on more than this.
+type Kind int
+
+const (
+	KindNative Kind = iota + 1 // native age secret-key identities
+	KindPlugin                 // AGE-PLUGIN-<NAME>-1
+)
+
+// Identity is one usable decryption identity. A native identity may carry the
+// X25519 scalar; a plugin identity never carries key material at all.
 type Identity struct {
-	age    *age.X25519Identity
-	scalar [ScalarLen]byte
+	age        *age.X25519Identity
+	native     age.Identity // non-X25519 native (hybrid); nil for X25519 and plugins
+	plugin     age.Identity
+	kind       Kind
+	pluginName string
+	source     string // the -identity path, for diagnoses; never key material
+	scalar     [ScalarLen]byte
+	hasScalar  bool
+	attempt    attemptState
 }
+
+func (id *Identity) Kind() Kind         { return id.kind }
+func (id *Identity) PluginName() string { return id.pluginName }
+func (id *Identity) Source() string     { return id.source }
+func (id *Identity) Interactive() bool  { return id.kind == KindPlugin }
+func (id *Identity) HasScalar() bool    { return id.hasScalar }
 
 func Generate() (*Identity, error) {
 	id, err := age.GenerateX25519Identity()
@@ -119,7 +149,30 @@ func Load(path string) (*Identity, error) {
 }
 
 func (id *Identity) RecipientString() (string, error) {
-	return id.age.Recipient().String(), nil
+	if id.kind == KindPlugin {
+		return "", ErrNoLocalRecipient
+	}
+	if id.age != nil {
+		return id.age.Recipient().String(), nil
+	}
+	if s, ok := nativeRecipientString(id.native); ok {
+		return s, nil
+	}
+	return "", errNoNativeRecipient
+}
+
+func nativeRecipientString(id age.Identity) (string, bool) {
+	if id == nil {
+		return "", false
+	}
+	switch v := id.(type) {
+	case *age.X25519Identity:
+		return v.Recipient().String(), true
+	case *age.HybridIdentity:
+		return v.Recipient().String(), true
+	default:
+		return "", false
+	}
 }
 
 func (id *Identity) DecryptBytes(blob []byte) ([]byte, error) {
@@ -151,7 +204,11 @@ func (id *Identity) KeyFor(version, macSource uint32) ([]byte, error) {
 }
 
 // ManifestMACKey returns a fresh 32-byte key. The caller owns its lifetime.
+// ErrNoScalar unless this identity holds an X25519 scalar: never HKDF zeros.
 func (id *Identity) ManifestMACKey() ([]byte, error) {
+	if !id.hasScalar {
+		return nil, ErrNoScalar
+	}
 	// FR-3: never sha256(identity.String()) — that hashes the Bech32 encoding, so a
 	// format change silently rotates every MAC on files that must open in ten years.
 	// Never the raw scalar as an HMAC key — domain collision with its X25519 use.
@@ -162,6 +219,10 @@ func (id *Identity) ManifestMACKey() ([]byte, error) {
 // made by hkdf.Key or the garbage collector.
 func (id *Identity) Zero() {
 	clear(id.scalar[:])
+	id.attempt.mu.Lock()
+	id.attempt.err = nil
+	id.attempt.attempted = false
+	id.attempt.mu.Unlock()
 }
 
 var (
@@ -173,6 +234,7 @@ var (
 	ErrHRPMismatch       = errors.New("identity has an unexpected human-readable prefix")
 
 	errMACSourceUnsupported = errors.New("manifest MAC source is not supported")
+	errNoNativeRecipient    = errors.New("native identity has no local recipient string")
 )
 
 func newIdentity(id *age.X25519Identity) (*Identity, error) {
@@ -180,7 +242,7 @@ func newIdentity(id *age.X25519Identity) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Identity{age: id, scalar: scalar}, nil
+	return &Identity{age: id, scalar: scalar, kind: KindNative, hasScalar: true}, nil
 }
 
 func scalarFrom(id *age.X25519Identity) (out [ScalarLen]byte, err error) {
