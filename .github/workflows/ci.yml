@@ -22,6 +22,7 @@ jobs:
           grep -q  'filippo.io/age v1.3.1'                go.mod
           grep -q  'github.com/klauspost/reedsolomon v1.14.2' go.mod
           grep -q  'github.com/urfave/cli/v3 v3.12.0'     go.mod
+          grep -q  'golang.org/x/term v0.37.0'            go.mod
           go list -m all | grep -q 'golang.org/x/crypto v0.45.0'
 
       - name: Discipline

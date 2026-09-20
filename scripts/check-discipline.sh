@@ -4,10 +4,10 @@
 # D2: pipeline imports only key, crypt, erasure, manifest + stdlib.
 # D3: nothing under internal/ imports pipeline; cmd/envelope is its only importer.
 # D4: manifest imports no internal package.
-# D5: internal/key/bech32 is imported by internal/key only.
+# D5: internal/key/bech32 and internal/key/tty are imported by internal/key only.
 # D6: only cmd/envelope may import github.com/urfave/cli/v3.
 # D7: cmd/envelope imports only pipeline, urfave/cli/v3 + stdlib.
-# D8: internal/key may import only internal/key/bech32, internal/crypt, filippo.io/age + stdlib.
+# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, golang.org/x/term + stdlib.
 # D9: filippo.io/age/plugin is imported by internal/key and test/fakeplugin only.
 # D10: test/fakeplugin is imported by _test.go files only.
 # D11: the literal yubikey appears nowhere under internal/ or cmd/.
@@ -114,6 +114,16 @@ if pkg_exists ./internal/key/bech32; then
 	done < <(go list -deps -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/key/bech32"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
+# D5: internal/key/tty is imported by internal/key and nothing else.
+if pkg_exists ./internal/key/tty; then
+	while IFS= read -r importer; do
+		[ -n "$importer" ] || continue
+		if [ "$importer" != "$mod/internal/key" ]; then
+			fail "D5: $importer imports internal/key/tty (only internal/key may)"
+		fi
+	done < <(go list -deps -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/key/tty"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
+fi
+
 # D6: only cmd/envelope may import github.com/urfave/cli/v3.
 while IFS= read -r rec; do
 	[ -n "$rec" ] || continue
@@ -143,7 +153,7 @@ if pkg_exists ./cmd/envelope; then
 	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/cmd/envelope"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./cmd/envelope)
 fi
 
-# D8: internal/key may import only internal/key/bech32, internal/crypt, filippo.io/age + stdlib.
+# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, golang.org/x/term + stdlib.
 # Inspect Imports+TestImports+XTestImports (D6's form) of the key package itself.
 # test/fakeplugin is TestMain dispatch; D10 already forbids it from non-test sources.
 if pkg_exists ./internal/key; then
@@ -155,12 +165,12 @@ if pkg_exists ./internal/key; then
 			continue
 		fi
 		case "$imp" in
-		"$mod/internal/key/bech32" | "$mod/internal/crypt" | "filippo.io/age" | "$mod/test/fakeplugin")
+		"$mod/internal/key/bech32" | "$mod/internal/key/tty" | "$mod/internal/crypt" | "filippo.io/age" | "golang.org/x/term" | "$mod/test/fakeplugin")
 			continue
 			;;
 		esac
 		if [ "$(go list -f '{{.Standard}}' "$imp")" != true ]; then
-			fail "D8: internal/key imports $imp (only internal/key/bech32, internal/crypt, filippo.io/age + stdlib allowed)"
+			fail "D8: internal/key imports $imp (only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, golang.org/x/term + stdlib allowed)"
 		fi
 	done < <(go list -f '{{range .Imports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .TestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}' ./internal/key)
 fi

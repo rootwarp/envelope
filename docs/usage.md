@@ -311,4 +311,6 @@ source.
 | `unexpected positional argument` | Extra argument after the flags | Remove it |
 | `did you mean "…"?` | Command name is close to a known command | Use the suggested command |
 
+Interactive identities need a terminal; with none, the run is refused before any plugin starts.
+
 A failed restore never leaves a partial output file behind.
