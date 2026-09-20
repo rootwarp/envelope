@@ -289,7 +289,9 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, id *key.Ident
 	if testWrapDst != nil {
 		dst = testWrapDst(ctx, f)
 	}
-	n, err = crypt.Decrypt(dst, ctxReader(ctx, bytes.NewReader(ct)), id.AgeIdentity())
+	n, err = id.DecryptTo(dst, func() io.Reader {
+		return ctxReader(ctx, bytes.NewReader(ct))
+	})
 	if err != nil {
 		return 0, fmt.Errorf("payload: %w", err) // age authenticates HERE
 	}

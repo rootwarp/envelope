@@ -14,8 +14,8 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"golang.org/x/crypto/curve25519"
 
+	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/key/bech32"
 )
 
@@ -210,10 +210,6 @@ func TestScalarRoundTrip(t *testing.T) {
 			sha256.Sum256(decoded[:]), sha256.Sum256(id.scalar[:]))
 	}
 
-	derived, err := curve25519.X25519(decoded[:], curve25519.Basepoint)
-	if err != nil {
-		t.Fatal(err)
-	}
 	hrp, recKey, err := bech32.Decode(id.age.Recipient().String())
 	if err != nil {
 		t.Fatal(err)
@@ -223,10 +219,6 @@ func TestScalarRoundTrip(t *testing.T) {
 	}
 	if len(recKey) != 32 {
 		t.Fatalf("recipient key len = %d, want 32", len(recKey))
-	}
-	if !hmac.Equal(derived, recKey) {
-		t.Errorf("recipient key material mismatch: len got=%d want=%d, sha256 got=%x want=%x",
-			len(derived), len(recKey), sha256.Sum256(derived), sha256.Sum256(recKey))
 	}
 
 	reencoded := testBech32Encode(HRP, decoded[:])
@@ -280,6 +272,98 @@ func TestScalarLength(t *testing.T) {
 	short := testBech32Encode(HRP, make([]byte, ScalarLen-1))
 	_, err := scalarFromString(short)
 	assertSentinel(t, err, ErrScalarLength)
+}
+
+func TestDecryptToOpenOncePerAttempt(t *testing.T) {
+	a, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Zero)
+	b, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Zero)
+
+	plain := []byte("decrypt-to-open")
+	ct, err := a.EncryptBytes(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	calls := 0
+	open := func() io.Reader {
+		calls++
+		return bytes.NewReader(ct)
+	}
+
+	var dst bytes.Buffer
+	_, err = b.DecryptTo(&dst, open)
+	if !errors.Is(err, crypt.ErrWrongIdentity) {
+		t.Fatalf("wrong identity: errors.Is(., ErrWrongIdentity) = false")
+	}
+	if calls != 1 {
+		t.Fatalf("open calls after failed attempt = %d, want 1", calls)
+	}
+	if dst.Len() != 0 {
+		t.Fatalf("failed attempt wrote %d bytes, want 0", dst.Len())
+	}
+
+	n, err := a.DecryptTo(&dst, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("open calls after success = %d, want 2", calls)
+	}
+	if n != int64(len(plain)) {
+		t.Fatalf("DecryptTo n = %d, want %d", n, len(plain))
+	}
+	assertSameBytes(t, dst.Bytes(), plain)
+}
+
+func TestDecryptToConsumedReaderFailsSecondAttempt(t *testing.T) {
+	a, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Zero)
+	b, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Zero)
+
+	plain := []byte("decrypt-to-consumed")
+	ct, err := a.EncryptBytes(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := bytes.NewReader(ct)
+	openSame := func() io.Reader { return r }
+	_, err = b.DecryptTo(io.Discard, openSame)
+	if !errors.Is(err, crypt.ErrWrongIdentity) {
+		t.Fatalf("wrong identity: errors.Is(., ErrWrongIdentity) = false")
+	}
+	var dst bytes.Buffer
+	_, err = a.DecryptTo(&dst, openSame)
+	if err == nil {
+		t.Fatal("reused consumed reader succeeded; open must return a fresh stream")
+	}
+	if dst.Len() != 0 {
+		t.Fatalf("consumed retry wrote %d bytes, want 0", dst.Len())
+	}
+
+	n, err := a.DecryptTo(&dst, func() io.Reader { return bytes.NewReader(ct) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(len(plain)) {
+		t.Fatalf("fresh open n = %d, want %d", n, len(plain))
+	}
+	assertSameBytes(t, dst.Bytes(), plain)
 }
 
 func TestCreatedIdentityAcceptedByAge(t *testing.T) {

@@ -694,7 +694,15 @@ func TestForgottenCloseFailsRestore(t *testing.T) {
 	// Build ciphertext the wrong way on purpose: write N bytes through age.Encrypt and
 	// never Close. The tail — including the final chunk's Poly1305 tag — is missing.
 	var ct bytes.Buffer
-	w, err := age.Encrypt(&ct, id.Recipient())
+	recStr, err := id.RecipientString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := age.ParseX25519Recipient(recStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := age.Encrypt(&ct, rec)
 	if err != nil {
 		t.Fatal(err)
 	}

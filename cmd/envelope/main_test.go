@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
@@ -667,7 +666,7 @@ func tamperManifestMAC(t *testing.T, identityPath, manPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := crypt.EncryptBytes(body, id.Recipient())
+	out, err := id.EncryptBytes(body)
 	if err != nil {
 		t.Fatal(err)
 	}

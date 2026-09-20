@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/rootwarp/envelope/internal/crypt"
 )
 
 type VerifyOptions struct {
@@ -105,7 +103,9 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 	}
 
 	var sink countingSink
-	n, err := crypt.Decrypt(&sink, ctxReader(ctx, bytes.NewReader(ct)), set.id.AgeIdentity())
+	n, err := set.id.DecryptTo(&sink, func() io.Reader {
+		return ctxReader(ctx, bytes.NewReader(ct))
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return nil, fmt.Errorf("payload: %w", err)

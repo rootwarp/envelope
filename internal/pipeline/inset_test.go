@@ -438,7 +438,7 @@ func TestFailingManifestNoteIsNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad, err := crypt.EncryptBytes(body, id.Recipient())
+	bad, err := id.EncryptBytes(body)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"crypto/hkdf"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -119,8 +120,54 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Version != 1 {
-		t.Fatalf("manifest Version = %d, want 1", m.Version)
+	if m.Version != 1 || m.K != 3 || m.N != 5 {
+		t.Fatalf("manifest Version=%d k=%d n=%d, want 1 3 5", m.Version, m.K, m.N)
+	}
+	if m.MACSource != 0 || len(m.MACKeyID) != 0 {
+		t.Fatal("decoded v1 body carried mac source fields")
+	}
+	if m.StripeLen != manifest.StripeLen(m.CiphertextLen, m.K) {
+		t.Fatalf("StripeLen = %d, want %d", m.StripeLen, manifest.StripeLen(m.CiphertextLen, m.K))
+	}
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("shard-%02d", i)
+		sum := sha256.Sum256(before[name])
+		if !bytes.Equal(m.Digests[i], sum[:]) {
+			t.Fatalf("%s digest does not match committed shard bytes", name)
+		}
+		if int64(len(before[name])) != m.StripeLen {
+			t.Fatalf("%s len = %d, want StripeLen %d", name, len(before[name]), m.StripeLen)
+		}
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte("mac_source")) || bytes.Contains(body, []byte("mac_key_id")) {
+		t.Fatal("decoded v1 body JSON contains mac source keys")
+	}
+
+	resplit := t.TempDir()
+	if _, err := Split(context.Background(), SplitOptions{
+		IdentityPath: idPath,
+		InPath:       outPath,
+		OutDir:       resplit,
+		K:            3,
+		N:            5,
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	newBlob, err := os.ReadFile(filepath.Join(resplit, "manifest.age"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newM, err := manifest.Open(newBlob, id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newM.Version != m.Version || newM.K != m.K || newM.N != m.N ||
+		newM.CiphertextLen != m.CiphertextLen || newM.StripeLen != m.StripeLen {
+		t.Fatal("re-split decoded v1 body disagrees with the committed fixture")
 	}
 }
 

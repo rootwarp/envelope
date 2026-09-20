@@ -24,6 +24,22 @@ func TestDisciplineD4(t *testing.T) {
 	assertDisciplineRule(t, root, "D4")
 }
 
+func TestDisciplineD8(t *testing.T) {
+	root := scratchDiscipline(t)
+	writeFile(t, filepath.Join(root, "internal", "crypt", "crypt.go"), "package crypt\n")
+	writeFile(t, filepath.Join(root, "internal", "erasure", "erasure.go"), "package erasure\n")
+	writeFile(t, filepath.Join(root, "internal", "key", "key.go"),
+		"package key\n\nimport _ \"github.com/rootwarp/envelope/internal/erasure\"\n")
+	assertDisciplineRule(t, root, "D8")
+}
+
+func TestDisciplineNoAgeIdentifier(t *testing.T) {
+	root := scratchDiscipline(t)
+	writeFile(t, filepath.Join(root, "internal", "pipeline", "p.go"),
+		"package pipeline\n\nvar _ = age.Decrypt\n")
+	assertDisciplineRule(t, root, "D2")
+}
+
 func TestDisciplineD9(t *testing.T) {
 	root := scratchDiscipline(t)
 	writeFile(t, filepath.Join(root, "internal", "crypt", "crypt.go"), "package crypt\n")

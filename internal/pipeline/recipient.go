@@ -1,9 +1,6 @@
 package pipeline
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/rootwarp/envelope/internal/key"
 )
 
@@ -15,9 +12,5 @@ func Recipient(opts RecipientOptions) (string, error) {
 		return "", err
 	}
 	defer id.Zero()
-	s, ok := id.Recipient().(fmt.Stringer)
-	if !ok {
-		return "", errors.New("identity has no printable recipient")
-	}
-	return s.String(), nil
+	return id.RecipientString()
 }

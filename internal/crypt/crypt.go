@@ -1,5 +1,6 @@
 // Package crypt encrypts and decrypts readers with age and counts ciphertext
-// bytes that actually flowed.
+// bytes that actually flowed. Variadic recipients are the only change this
+// initiative makes here.
 package crypt
 
 import (
@@ -13,11 +14,13 @@ import (
 )
 
 // Encrypt writes age ciphertext for src to dst and returns the number of
-// ciphertext bytes that actually flowed. Named returns are required: n and err
-// are both assigned inside the deferred Close.
-func Encrypt(dst io.Writer, src io.Reader, r age.Recipient) (n int64, err error) {
+// ciphertext bytes that actually flowed. Recipients are passed through in
+// call order: age emits one stanza set per recipient, and one recipient may
+// emit several stanzas. Named returns are required: n and err are both
+// assigned inside the deferred Close.
+func Encrypt(dst io.Writer, src io.Reader, rs ...age.Recipient) (n int64, err error) {
 	cw := &countingWriter{w: dst} // innermost sink, wrapping dst BEFORE age.Encrypt
-	w, aerr := age.Encrypt(cw, r)
+	w, aerr := age.Encrypt(cw, rs...)
 	if aerr != nil {
 		return 0, aerr
 	}
@@ -46,9 +49,9 @@ func Decrypt(dst io.Writer, src io.Reader, id age.Identity) (n int64, err error)
 
 // EncryptBytes encrypts plaintext in memory for callers that hold a small blob
 // (manifest).
-func EncryptBytes(plaintext []byte, r age.Recipient) ([]byte, error) {
+func EncryptBytes(plaintext []byte, rs ...age.Recipient) ([]byte, error) {
 	var buf bytes.Buffer
-	if _, err := Encrypt(&buf, bytes.NewReader(plaintext), r); err != nil {
+	if _, err := Encrypt(&buf, bytes.NewReader(plaintext), rs...); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

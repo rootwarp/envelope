@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,11 +40,11 @@ func TestRecipient(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer loaded.Zero()
-	s, ok := loaded.Recipient().(fmt.Stringer)
-	if !ok {
-		t.Fatal("loaded recipient is not a fmt.Stringer")
+	s, err := loaded.RecipientString()
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := s.String() + "\n"
+	want := s + "\n"
 	if got != want {
 		t.Fatalf("stdout does not equal independently computed recipient (got len=%d want len=%d)", len(got), len(want))
 	}

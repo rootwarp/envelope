@@ -118,20 +118,22 @@ func Load(path string) (*Identity, error) {
 	return newIdentity(x25519)
 }
 
-func (id *Identity) AgeIdentity() age.Identity {
-	return id.age
-}
-
-func (id *Identity) Recipient() age.Recipient {
-	return id.age.Recipient()
+func (id *Identity) RecipientString() (string, error) {
+	return id.age.Recipient().String(), nil
 }
 
 func (id *Identity) DecryptBytes(blob []byte) ([]byte, error) {
-	return crypt.DecryptBytes(blob, id.AgeIdentity())
+	return crypt.DecryptBytes(blob, id.age)
+}
+
+// DecryptTo streams a payload. open is a function because a reader handed
+// to a failed age.Decrypt has already been consumed past the header.
+func (id *Identity) DecryptTo(dst io.Writer, open func() io.Reader) (int64, error) {
+	return crypt.Decrypt(dst, open(), id.age)
 }
 
 func (id *Identity) EncryptBytes(plaintext []byte) ([]byte, error) {
-	return crypt.EncryptBytes(plaintext, id.Recipient())
+	return crypt.EncryptBytes(plaintext, id.age.Recipient())
 }
 
 func (id *Identity) KeyIDFor(version, macSource uint32) ([]byte, error) {

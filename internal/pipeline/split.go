@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/erasure"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
@@ -18,6 +17,7 @@ import (
 
 type SplitOptions struct {
 	IdentityPath string
+	Recipients   []string // public recipient strings, never an age type
 	InPath       string
 	OutDir       string
 	K, N         int
@@ -83,13 +83,18 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	}
 	defer in.Close()
 
+	rs, err := key.NewRecipientSet(id)
+	if err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
 	var ciphertextLen int64
 	if testInjectCiphertext != nil {
 		buf.Write(testInjectCiphertext())
 		ciphertextLen = int64(buf.Len())
 	} else {
-		ciphertextLen, err = crypt.Encrypt(&buf, ctxReader(ctx, in), id.Recipient())
+		ciphertextLen, err = rs.Encrypt(&buf, ctxReader(ctx, in))
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +145,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		StripeLen:     stripeLen,
 		Digests:       digests,
 		MAC:           make([]byte, manifest.MACLen), // Seal validates shape before filling the tag
-	}, macKey, id)
+	}, macKey, rs)
 	if err != nil {
 		return nil, err
 	}

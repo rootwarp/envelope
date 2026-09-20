@@ -260,6 +260,42 @@ func TestDecryptBytesAuthenticatesBeforeReturn(t *testing.T) {
 	}
 }
 
+func TestEncryptTwoRecipientsEitherDecrypts(t *testing.T) {
+	a, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plain := make([]byte, 32)
+	if _, err := rand.Read(plain); err != nil {
+		t.Fatal(err)
+	}
+	var ct bytes.Buffer
+	if _, err := Encrypt(&ct, bytes.NewReader(plain), a.Recipient(), b.Recipient()); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSameBytes(t, decryptAge(t, ct.Bytes(), a), plain)
+	assertSameBytes(t, decryptAge(t, ct.Bytes(), b), plain)
+
+	other, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dst bytes.Buffer
+	_, err = Decrypt(&dst, bytes.NewReader(ct.Bytes()), other)
+	if !errors.Is(err, ErrWrongIdentity) {
+		t.Fatalf("third identity: errors.Is(., ErrWrongIdentity) = false")
+	}
+	if dst.Len() != 0 {
+		t.Fatalf("third identity: dst received %d bytes, want 0", dst.Len())
+	}
+}
+
 func TestEncryptBytesDecryptBytesRoundTrip(t *testing.T) {
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
