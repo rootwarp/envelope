@@ -224,12 +224,20 @@ message restore would.
 
 ```sh
 envelope recipient -identity identity.txt > identity.pub
+envelope recipient -identity bundle.txt
 ```
 
-Prints the public `age1` recipient of `-identity`, one line, to stdout. Use it
-to label which identity owns a shard set, or to check the identity against
-other age tools. It never prints the secret key. The identity file is not
-modified.
+Prints the public `age1` recipient of `-identity` to stdout. A file identity
+prints one line. A bundle prints the whole recorded set, one per line, in
+bundle order. Use it to label which identity owns a shard set, or to check the
+identity against other age tools. It never prints the secret key. The identity
+file is not modified.
+
+A plugin identity stub carries no public key — only a serial, a slot, and a
+short fingerprint — so Envelope cannot recover the recipient from the stub
+alone. `envelope recipient -identity stub.txt` fails and points at
+`envelope bind`. Get the string from the plugin's own listing:
+`age-plugin-yubikey --list-all`.
 
 ## Full example
 
@@ -278,7 +286,7 @@ not part of the contract.
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
 stdout carries only what the operator asked a command to produce: version info,
-help text, a completion script, the recipient string, and the verify report.
+help text, a completion script, recipient lines, and the verify report.
 stderr carries status, diagnostics, and errors. Neither stream ever carries
 payload or key material, and neither echoes a positional argument's value.
 
@@ -488,6 +496,7 @@ gate in front of an exportable key.
 | `identity bundle exceeds size limit` | The file is larger than 64 KiB | Use another copy of the bundle; a real bundle is small |
 | `identity bundle requires at least one recipient` | The bundle would record no public recipient, so it could not split | Get the public recipient from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) and record it |
 | `identity bundle pin is corrupt` | The wrapped seed does not match this bundle's `mac_key_id` | Restore a known-good copy of the bundle; do not regenerate a seed |
+| `plugin identity has no local recipient string` | A plugin identity stub carries no public key | Record the recipient with `envelope bind`, or get it from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) |
 | `no identity bundle in this run; create one with envelope bind` | this shard set was made with a bundle; load it with `-identity bundle.txt` | Point `-identity` at the bundle `envelope bind` wrote |
 | `two bundles in one run record different MAC keys; pass one` | two bundles in one run record different MAC keys; pass one | Pass one bundle, or two copies of the same one |
 | `age plugin binary is not installed: age-plugin-…` | The plugin named by the identity is not on `PATH` | Install it with Homebrew, Nix, your distro package, or `cargo install`; confirm `age-plugin-<name>` is on `PATH` |

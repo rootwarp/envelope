@@ -185,6 +185,13 @@ func nativeIdentity(id age.Identity, path string) (*Identity, error) {
 	return n, nil
 }
 
+// IsBundle reports whether data's first non-empty line is an identity-bundle
+// header. An unsupported version still matches, so the caller can return
+// ErrBundleVersion instead of treating the file as a bare identity.
+func IsBundle(data []byte) bool {
+	return isBundle(data)
+}
+
 func isBundle(data []byte) bool {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {

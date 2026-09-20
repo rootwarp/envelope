@@ -17,12 +17,16 @@ func (a *app) recipientCommand() *cli.Command {
 		description: descriptionRecipient,
 		flags:       []cli.Flag{pathFlag("identity", "identity `FILE` from keygen")},
 		run: func(_ context.Context, c *cli.Command) error {
-			r, err := pipeline.Recipient(pipeline.RecipientOptions{IdentityPath: c.String("identity"), Terminal: testTerminal})
+			rs, err := pipeline.Recipient(pipeline.RecipientOptions{IdentityPath: c.String("identity"), Terminal: testTerminal})
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(a.stdout, r+"\n")
-			return err
+			for _, r := range rs {
+				if _, err := fmt.Fprint(a.stdout, r+"\n"); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	})
 }

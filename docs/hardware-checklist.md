@@ -10,6 +10,8 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 4. `envelope bind -identity stub.txt -recipient <yk-recipient> -recipient <paper-recipient> -out bundle.txt`; assert mode `0600`, valid UTF-8, no 32-byte cleartext secret, and `age -d -i bundle.txt` works against an Envelope-written `manifest.age`.
 
+5. `envelope recipient -identity bundle.txt` prints the recorded set, never `<identity-based recipient>`.
+
 10. `restore -identity yk1.txt -identity yk2.txt` with only YK2 present must succeed and must not prompt for YK1's PIN; then swap the order and repeat.
 
 11. Replacement drill. Import the backed-up P-256 key into a second YubiKey, regenerate the stub, `envelope bind -replace-identity`, and restore an existing shard set with no re-encryption. Confirm the recipient string is byte-identical to the original.

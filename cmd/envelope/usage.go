@@ -71,9 +71,12 @@ restore stops at the first usable copy of each shard, so checking every stored c
 Examples:
   envelope verify -identity identity.txt -in shards/
   envelope verify -identity identity.txt -in /mnt/a -in /mnt/b -in /mnt/c`
-	descriptionRecipient = `Prints the public age1 recipient of -identity, one line.
+	descriptionRecipient = `Prints the public age1 recipient of -identity.
+A file identity prints one line. A bundle prints the recorded set, one per line, in bundle order.
+A plugin identity stub has no local recipient; record it with bind, or get it from the plugin's own listing.
 Never prints the secret key. The identity file is not modified.
 
 Examples:
-  envelope recipient -identity identity.txt`
+  envelope recipient -identity identity.txt
+  envelope recipient -identity bundle.txt`
 )
