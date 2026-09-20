@@ -147,13 +147,13 @@ func TestLoadSetMalformedNoQuotedLine(t *testing.T) {
 	}
 }
 
-func TestLoadSetBundleUnsupported(t *testing.T) {
+func TestLoadSetIncompleteBundle(t *testing.T) {
 	skipWindows(t)
 	body := "# envelope-bundle: v1\n" + fakeplugin.Identity("envtest", fakeplugin.ModeOK) + "\n"
 	path := writeIdentityFile(t, body)
 	_, err := LoadSet([]string{path}, nil)
-	if !errors.Is(err, errBundleUnsupported) {
-		t.Fatalf("errors.Is(., errBundleUnsupported) = false: %v", err)
+	if !errors.Is(err, ErrBundleField) {
+		t.Fatalf("errors.Is(., ErrBundleField) = false: %v", err)
 	}
 	assertNoQuotedIdentityLine(t, err)
 }

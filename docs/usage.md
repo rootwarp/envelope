@@ -404,6 +404,8 @@ new seed would look, to you, like every shard set you own had been forged.
 | `identity bundle exceeds size limit` | The file is larger than 64 KiB | Use another copy of the bundle; a real bundle is small |
 | `identity bundle requires at least one recipient` | The bundle would record no public recipient, so it could not split | Get the public recipient from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) and record it |
 | `identity bundle pin is corrupt` | The wrapped seed does not match this bundle's `mac_key_id` | Restore a known-good copy of the bundle; do not regenerate a seed |
+| `no identity bundle in this run; create one with envelope bind` | this shard set was made with a bundle; load it with `-identity bundle.txt` | Point `-identity` at the bundle `envelope bind` wrote |
+| `two bundles in one run record different MAC keys; pass one` | two bundles in one run record different MAC keys; pass one | Pass one bundle, or two copies of the same one |
 | `age plugin binary is not installed: age-plugin-…` | The plugin named by the identity is not on `PATH` | Install it with Homebrew, Nix, your distro package, or `cargo install`; confirm `age-plugin-<name>` is on `PATH` |
 | `age plugin failed: age-plugin-…` | The plugin refused the unwrap (no card, wrong card or slot, wrong PIN, blocked PIN, AEAD failure) | Plug in the right key, check the slot, retry with the correct PIN; a wrong PIN is fatal and is not retried |
 | `age plugin protocol error: age-plugin-…` | The plugin exited non-zero or broke the age plugin protocol | Reinstall the plugin from Homebrew, Nix, the distro package, or `cargo install`; confirm `age-plugin-<name> --version` runs |

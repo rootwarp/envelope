@@ -31,6 +31,12 @@ const (
 	ScalarLen    = 32
 	MACKeyLen    = 32
 
+	// Duplicated from internal/manifest: D8 forbids the import.
+	versionScalar   uint32 = 1
+	versionPin      uint32 = 2
+	macSourceScalar uint32 = 0
+	macSourcePin    uint32 = 1
+
 	macSalt = "envelope"
 	macInfo = "envelope v1 manifest mac"
 )
@@ -195,14 +201,14 @@ func (id *Identity) EncryptBytes(plaintext []byte) ([]byte, error) {
 }
 
 func (id *Identity) KeyIDFor(version, macSource uint32) ([]byte, error) {
-	if version != 1 || macSource != 0 {
+	if version != versionScalar || macSource != macSourceScalar {
 		return nil, errMACSourceUnsupported
 	}
 	return nil, nil
 }
 
 func (id *Identity) KeyFor(version, macSource uint32) ([]byte, error) {
-	if version != 1 || macSource != 0 {
+	if version != versionScalar || macSource != macSourceScalar {
 		return nil, errMACSourceUnsupported
 	}
 	return id.ManifestMACKey()

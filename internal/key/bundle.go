@@ -56,6 +56,8 @@ var (
 	ErrBundleTooLarge    = errors.New("identity bundle exceeds size limit")
 	ErrBundleNoRecipient = errors.New("identity bundle requires at least one recipient")
 	ErrPinCorrupt        = errors.New("identity bundle pin is corrupt")
+	ErrNoPin             = errors.New("no identity bundle in this run; create one with envelope bind")
+	ErrAmbiguousPin      = errors.New("two bundles in one run record different MAC keys; pass one")
 )
 
 func errNoRecipient() error {

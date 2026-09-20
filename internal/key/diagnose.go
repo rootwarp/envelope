@@ -24,8 +24,6 @@ var (
 	ErrPluginProtocol     = errors.New("age plugin protocol error")
 	ErrNoScalar           = errors.New("identity has no X25519 scalar")
 	ErrNoLocalRecipient   = errors.New("plugin identity has no local recipient string")
-
-	errBundleUnsupported = errors.New("identity bundles are not yet supported")
 )
 
 // diagnose attaches an Envelope sentinel at the call site. Plugin-supplied

@@ -3,6 +3,7 @@ package key
 import (
 	"bufio"
 	"bytes"
+	"crypto/hmac"
 	"os"
 	"strings"
 	"sync"
@@ -20,15 +21,26 @@ const bundleHeaderPrefix = "# envelope-bundle:"
 type Set struct {
 	ids          []*Identity
 	pin          *pinSource
+	pinAmbiguous bool
 	ui           *ClientUI
 	term         TerminalSource
 	nPaths       int
 	bundle       bool
 	interactions atomic.Int32
+
+	macMu    sync.Mutex
+	macKey   []byte
+	macErr   error
+	macReady bool
 }
 
-// pinSource is filled by YK-11. HasPin is false until then.
-type pinSource struct{}
+// pinSource is the card-free record of one bundle's pin: the public key id,
+// the recorded recipients, and the pin ciphertext. The seed is never stored.
+type pinSource struct {
+	macKeyID   []byte
+	recipients []string
+	pin        []byte
+}
 
 type attemptState struct {
 	mu        sync.Mutex
@@ -36,10 +48,16 @@ type attemptState struct {
 	err       error
 }
 
+// testObserveSeed, when set, receives the unwrapped seed before the two HKDFs.
+// Tests alias that buffer to prove it is cleared before KeyFor returns (I-4).
+var testObserveSeed func([]byte)
+
 // LoadSet reads each path, routing AGE-PLUGIN- lines to plugin.NewIdentity and
 // the remainder to age.ParseIdentities in one call so its diagnostics stay
 // intact. plugin.NewIdentity starts no process. A path whose first non-empty
-// line is the bundle header is recognised and refused until YK-11.
+// line is the bundle header is parsed as a bundle: LoadSet records that
+// bundle's mac_key_id, recipients and pin ciphertext (card-free) and does
+// not unwrap the pin.
 func LoadSet(paths []string, term TerminalSource) (*Set, error) {
 	s := &Set{
 		term:   term,
@@ -69,9 +87,27 @@ func (s *Set) loadPath(path string) (natives, plugins []*Identity, err error) {
 	}
 	if isBundle(data) {
 		s.bundle = true
-		return nil, nil, errBundleUnsupported
+		b, err := parseBundle(data)
+		if err != nil {
+			return nil, nil, err
+		}
+		b.Path = path
+		s.recordPin(b)
+		return s.parseIdentityLines(path, b.Identities)
 	}
+	return s.parseIdentityData(path, data)
+}
 
+func (s *Set) parseIdentityLines(path string, lines []string) (natives, plugins []*Identity, err error) {
+	var buf bytes.Buffer
+	for _, line := range lines {
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+	}
+	return s.parseIdentityData(path, buf.Bytes())
+}
+
+func (s *Set) parseIdentityData(path string, data []byte) (natives, plugins []*Identity, err error) {
 	var rest bytes.Buffer
 	var pluginLines []string
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -119,6 +155,21 @@ func (s *Set) loadPath(path string) (natives, plugins []*Identity, err error) {
 		}
 	}
 	return natives, plugins, nil
+}
+
+func (s *Set) recordPin(b *Bundle) {
+	rec := &pinSource{
+		macKeyID:   append([]byte(nil), b.MACKeyID...),
+		recipients: append([]string(nil), b.Recipients...),
+		pin:        append([]byte(nil), b.Pin...),
+	}
+	if s.pin == nil {
+		s.pin = rec
+		return
+	}
+	if !hmac.Equal(s.pin.macKeyID, rec.macKeyID) {
+		s.pinAmbiguous = true
+	}
 }
 
 func nativeIdentity(id age.Identity, path string) (*Identity, error) {
@@ -175,24 +226,137 @@ func (s *Set) Interactive() bool {
 
 func (s *Set) HasPin() bool { return s.pin != nil }
 
+func (s *Set) pinChoice() error {
+	if s.pinAmbiguous {
+		return ErrAmbiguousPin
+	}
+	if s.pin == nil {
+		return ErrNoPin
+	}
+	return nil
+}
+
+// KeyIDFor returns the 16-byte public MAC key id this run's pin derives, or
+// nil for version 1. It reads the bundle's recorded id and starts no plugin:
+// the key-id check can only cause a rejection, never an acceptance, because
+// only the MAC decides anything.
+//
+// At most one distinct pin per run, refused at the point of need, never at
+// load, because a pure-v1 run with a hardware bundle loaded must still cost
+// zero interactions. Bundles recording the same id are interchangeable and
+// the first is used; different ids return ErrAmbiguousPin.
 func (s *Set) KeyIDFor(version, macSource uint32) ([]byte, error) {
 	if s == nil || len(s.ids) == 0 {
 		return nil, ErrNotSingleIdentity
 	}
-	// Card-free: the first identity's KeyIDFor never starts a plugin.
-	return s.ids[0].KeyIDFor(version, macSource)
+	switch {
+	case version == versionScalar && macSource == macSourceScalar:
+		return nil, nil
+	case version == versionPin && macSource == macSourcePin:
+		if err := s.pinChoice(); err != nil {
+			return nil, err
+		}
+		return copyMACKey(s.pin.macKeyID), nil
+	default:
+		return nil, errMACSourceUnsupported
+	}
 }
 
+// KeyFor returns the HMAC key a manifest of this version and source must be
+// verified under.
+//
+//	version 1, source 0: ADR-0003's HKDF over the X25519 scalar. No plugin.
+//	version 2, source 1: unwraps the bundle's pin through the identity set —
+//	                     one decrypt site (1 to p interactions), memoized per
+//	                     Set for the whole run — derives mac_key and
+//	                     mac_key_id, checks the derived id against the
+//	                     recorded one (ErrPinCorrupt), and zeroes the seed
+//	                     before returning.
+//
+// Any other pair is a distinct sentinel. Pin refusal is at the point of need,
+// never at load, because a pure-v1 run with a hardware bundle loaded must
+// still cost zero interactions. Memoization is per Set, not per process, so
+// Zero drops the cached key. The seed exists in memory only between the
+// unwrap and the two HKDF derivations and is cleared there (best-effort:
+// clear cannot scrub copies already made by hkdf.Key or the garbage collector).
 func (s *Set) KeyFor(version, macSource uint32) ([]byte, error) {
 	if s == nil || len(s.ids) == 0 {
 		return nil, ErrNotSingleIdentity
 	}
+	switch {
+	case version == versionScalar && macSource == macSourceScalar:
+		return s.scalarMACKey()
+	case version == versionPin && macSource == macSourcePin:
+		return s.pinMACKey()
+	default:
+		return nil, errMACSourceUnsupported
+	}
+}
+
+func (s *Set) scalarMACKey() ([]byte, error) {
 	for _, id := range s.ids {
 		if id.hasScalar {
-			return id.KeyFor(version, macSource)
+			return id.ManifestMACKey()
 		}
 	}
-	return s.ids[0].KeyFor(version, macSource)
+	return nil, ErrNoScalar
+}
+
+func (s *Set) pinMACKey() ([]byte, error) {
+	if err := s.pinChoice(); err != nil {
+		return nil, err
+	}
+	s.macMu.Lock()
+	defer s.macMu.Unlock()
+	if s.macReady {
+		if s.macErr != nil {
+			return nil, s.macErr
+		}
+		return copyMACKey(s.macKey), nil
+	}
+	key, err := s.unwrapPinMACKey()
+	s.macReady = true
+	s.macErr = err
+	if err != nil {
+		return nil, err
+	}
+	s.macKey = key
+	return copyMACKey(key), nil
+}
+
+func (s *Set) unwrapPinMACKey() ([]byte, error) {
+	seed, err := s.DecryptBytes(s.pin.pin)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(seed)
+	if testObserveSeed != nil {
+		testObserveSeed(seed)
+	}
+	if len(seed) != seedLen {
+		return nil, ErrPinCorrupt
+	}
+	macKey, err := derivePinMACKey(seed)
+	if err != nil {
+		return nil, err
+	}
+	gotID, err := derivePinMACKeyID(seed)
+	if err != nil {
+		clear(macKey)
+		return nil, err
+	}
+	defer clear(gotID)
+	if !hmac.Equal(gotID, s.pin.macKeyID) {
+		clear(macKey)
+		return nil, ErrPinCorrupt
+	}
+	return macKey, nil
+}
+
+func copyMACKey(k []byte) []byte {
+	out := make([]byte, len(k))
+	copy(out, k)
+	return out
 }
 
 // BareFileIdentity is the FR-YK-03 boolean: exactly one path, exactly one
@@ -206,6 +370,9 @@ func (s *Set) BareFileIdentity() bool {
 	return id.kind == KindNative && id.hasScalar
 }
 
+// Zero best-effort clears in-memory scalars and drops the memoized pin MAC
+// key. It cannot scrub copies already made by hkdf.Key or the garbage
+// collector. Memoization is per Set, so Zero must drop it.
 func (s *Set) Zero() {
 	if s == nil {
 		return
@@ -213,4 +380,10 @@ func (s *Set) Zero() {
 	for _, id := range s.ids {
 		id.Zero()
 	}
+	s.macMu.Lock()
+	clear(s.macKey)
+	s.macKey = nil
+	s.macErr = nil
+	s.macReady = false
+	s.macMu.Unlock()
 }
