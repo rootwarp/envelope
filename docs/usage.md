@@ -427,6 +427,9 @@ new seed would look, to you, like every shard set you own had been forged.
 | `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |
 | `malformed age file: …/manifest.age` | `manifest.age` is not age ciphertext (wrong file, truncated header) | Use another copy of the manifest |
 | `failed to decrypt and authenticate payload chunk, file may be corrupted or tampered with: …/manifest.age` | `manifest.age` is damaged or was modified | Use another copy of the manifest |
+| `unsupported manifest version` | this shard set was written by a newer binary; a v2 manifest is not readable by a pre-hardware Envelope — upgrade rather than downgrade | Upgrade Envelope |
+| `manifest MAC key id mismatch` | this manifest was MAC'd with a pin you do not have (hint; the field is attacker-chosen) | Load the identity bundle used at split |
+| `manifest MAC mismatch` | this manifest is forged or damaged (verdict) | Do not restore from this set; use another copy of the manifest only if you trust it |
 | `Required flag(s) "…" not set` | A required flag is missing | Pass every flag listed in that command's help |
 | `flag provided but not defined: -X` | Unknown flag | Drop it; see that command's help for the flags it accepts |
 | `unexpected positional argument` | Extra argument after the flags | Remove it |

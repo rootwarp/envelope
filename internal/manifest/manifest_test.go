@@ -342,7 +342,7 @@ func TestOpenInconsistentIsNotMACMismatch(t *testing.T) {
 func TestOpenRejectsVersionBump(t *testing.T) {
 	fx := sealedGolden(t)
 	blob := resealJSON(t, fx, func(m *Manifest) {
-		m.Version = 2
+		m.Version = 3
 	})
 	got, err := Open(blob, fx.id, fx.id)
 	assertOpenErr(t, got, err, ErrUnsupportedVersion)
@@ -371,7 +371,10 @@ func TestOpenTruncatedBlob(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open truncated blob: err = nil, want error")
 	}
-	for _, other := range []error{ErrUnsupportedVersion, ErrMalformed, ErrMACMismatch, ErrInconsistent} {
+	for _, other := range []error{
+		ErrUnsupportedVersion, ErrMalformed, ErrUnknownMACSource, ErrMACKeyIDMismatch,
+		ErrMACMismatch, ErrInconsistent,
+	} {
 		if errors.Is(err, other) {
 			t.Fatalf("Open truncated blob matched %v", other)
 		}
@@ -608,7 +611,10 @@ func assertOpenErr(t *testing.T, got *Manifest, err, want error) {
 	if !errors.Is(err, want) {
 		t.Fatalf("Open: errors.Is(., %v) = false", want)
 	}
-	for _, other := range []error{ErrUnsupportedVersion, ErrMalformed, ErrMACMismatch, ErrInconsistent, crypt.ErrWrongIdentity} {
+	for _, other := range []error{
+		ErrUnsupportedVersion, ErrMalformed, ErrUnknownMACSource, ErrMACKeyIDMismatch,
+		ErrMACMismatch, ErrInconsistent, crypt.ErrWrongIdentity,
+	} {
 		if other != want && errors.Is(err, other) {
 			t.Fatalf("Open: error also matched %v", other)
 		}

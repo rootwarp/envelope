@@ -8,6 +8,8 @@ Device-only items. Execute once; record results in the plan folder. A failure is
 
 12. `ykman piv reset` a spare key; `restore` and `verify` fail closed with a named diagnosis and write nothing.
 
+13. a manifest and shard set minted by a party holding only the recipient set is rejected on the MAC before reconstruction
+
 14. Run the full pipeline with stdin/stdout/stderr redirected and no controlling terminal via `setsid`/`nohup`: exits non-zero within seconds with `this identity needs a PIN and there is no terminal to ask on`, having written nothing.
 
 15. On a real terminal with stdin **and** stdout redirected, the PIN prompt still appears and is answerable.
