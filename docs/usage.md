@@ -311,6 +311,16 @@ work on the YubiKey 4 series, and `TouchPolicy::Cached` is a 15-second
 **wall-clock** window, so reading cold USB media between two invocations can
 cost a second touch.
 
+### Recipient strings
+
+A hardware identity's public recipient is an `age1…` string. Get it from the
+plugin's own listing; for YubiKey that is `age-plugin-yubikey --list-all`.
+Envelope never computes it from the identity stub.
+
+The string is public. Encrypting to it does not need the card. Mixing a
+hardware recipient with a paper (file-identity) recipient works: either
+identity alone can restore.
+
 ## Troubleshooting
 
 | Message | Cause | Fix |
