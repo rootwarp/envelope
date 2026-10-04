@@ -17,7 +17,7 @@ import (
 	"github.com/rootwarp/envelope/internal/manifest"
 )
 
-// FR-MD-06 I4: identity is os.SameFile, first spelling kept.
+// Identity is os.SameFile; the first spelling is kept.
 func TestResolveInDirsDedup(t *testing.T) {
 	dir := t.TempDir()
 	x := filepath.Join(dir, "X")
@@ -56,7 +56,7 @@ func TestResolveInDirsDedup(t *testing.T) {
 	})
 }
 
-// FR-MD-06: two directories that share a basename are still two directories.
+// Two directories that share a basename are still two directories.
 func TestResolveInDirsSameBasenameNotDeduped(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a", "shards")
@@ -80,7 +80,7 @@ func TestResolveInDirsSameBasenameNotDeduped(t *testing.T) {
 	}
 }
 
-// FR-MD-07 I7: existence check runs for d≥2 before any manifest or shard read.
+// With two or more directories, the existence check runs before any manifest or shard read.
 func TestResolveInDirsExistence(t *testing.T) {
 	good := t.TempDir()
 
@@ -135,7 +135,7 @@ func TestResolveInDirsExistence(t *testing.T) {
 	})
 }
 
-// FR-MD-07 I7: a single -in is not stat'ed, so ErrNoManifest stays the diagnosis.
+// A single -in is not stat'ed, so ErrNoManifest stays the diagnosis.
 func TestSingleInDirIsNeverStatted(t *testing.T) {
 	const given = "/nonexistent"
 	dirs, err := resolveInDirs([]string{given})
@@ -190,7 +190,7 @@ func (o *countingOpener) DecryptBytes(blob []byte) ([]byte, error) {
 // reseal decrypts a manifest and re-encrypts the SAME decoded content to the
 // same identity. age is randomized, so the blob differs byte-wise while every
 // decoded field — and therefore the MAC — is identical. This is the fixture
-// FR-MD-03's "byte-differing but content-identical" AC needs.
+// a byte-differing but content-identical pair needs.
 func reseal(t *testing.T, identityPath, srcManifest, dstManifest string) {
 	t.Helper()
 	blob, err := os.ReadFile(srcManifest)
@@ -265,7 +265,7 @@ func openManifest(t *testing.T, identityPath, manPath string) (*key.Identity, []
 	return id, macKey, m
 }
 
-// FR-MD-03 ADR 0010: byte-differing, content-identical manifests are not a conflict.
+// Byte-differing, content-identical manifests are not a conflict.
 func TestResealedManifestIsNotAConflict(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := split.OutDir
@@ -294,7 +294,7 @@ func TestResealedManifestIsNotAConflict(t *testing.T) {
 	}
 }
 
-// FR-MD-03 I5: a conflict is detected before any shard is opened.
+// A conflict is detected before any shard is opened.
 func TestConflictingManifests(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := split.OutDir
@@ -339,7 +339,7 @@ func TestConflictingManifests(t *testing.T) {
 	assertNoOutOrPartial(t, opts.OutPath)
 }
 
-// FR-MD-03 I1: blobs are read before key.Load.
+// Blobs are read before key.Load.
 func TestNoManifestPrecedesIdentityLoad(t *testing.T) {
 	_, err := Restore(context.Background(), RestoreOptions{
 		IdentityPaths: []string{filepath.Join(t.TempDir(), "missing-identity.txt")},
@@ -351,7 +351,7 @@ func TestNoManifestPrecedesIdentityLoad(t *testing.T) {
 	}
 }
 
-// FR-MD-03 AD-11: both no-manifest suffixes in one test, because the branch is the point.
+// Both no-manifest suffixes in one test, because the branch is the point.
 func TestNoManifestWording(t *testing.T) {
 	a := t.TempDir()
 	b := t.TempDir()
@@ -377,7 +377,7 @@ func TestNoManifestWording(t *testing.T) {
 	}
 }
 
-// FR-MD-03 rule 3: a foreign candidate note names its own manifest path, never the identity.
+// A foreign candidate note names its own manifest path, never the identity.
 func TestForeignManifestNamesItsOwnPath(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := split.OutDir
@@ -431,7 +431,7 @@ func TestForeignManifestNamesItsOwnPath(t *testing.T) {
 	}
 }
 
-// FR-MD-03 rule 3: a MAC-failing candidate is reported and is not fatal.
+// A MAC-failing candidate is reported and is not fatal.
 func TestFailingManifestNoteIsNotFatal(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := split.OutDir
@@ -482,7 +482,7 @@ func TestFailingManifestNoteIsNotFatal(t *testing.T) {
 	}
 }
 
-// FR-MD-03 I2: when nothing authenticates, notes are not flushed.
+// When nothing authenticates, notes are not flushed.
 func TestWrongIdentityBuffersNoNotes(t *testing.T) {
 	restore, split := splitFixture(t)
 	other := filepath.Join(t.TempDir(), "identity.txt")
@@ -510,7 +510,7 @@ func TestWrongIdentityBuffersNoNotes(t *testing.T) {
 	assertNoOutOrPartial(t, opts.OutPath)
 }
 
-// FR-MD-03 rules 1, 2 and 5: last-only, all directories, and none.
+// Last-only, all directories, and none.
 func TestManifestPresence(t *testing.T) {
 	restore, split := splitFixture(t)
 	want, err := os.ReadFile(split.InPath)

@@ -58,7 +58,7 @@ func TestSplitFRYK05WrapOKUnwrapFails(t *testing.T) {
 		t.Fatal("err = nil, want pin unwrap failure")
 	}
 	if !encrypted {
-		t.Fatal("payload encryption did not complete before S9")
+		t.Fatal("payload encryption did not complete before the pin unwrap")
 	}
 	got := err.Error()
 	if !strings.Contains(got, "pin") {
@@ -615,7 +615,7 @@ func TestSplitNoRecipientFromIdentity(t *testing.T) {
 		t.Fatal("split from a plugin identity with no recipient succeeded")
 	}
 	if errors.Is(err, key.ErrNoLocalRecipient) {
-		t.Fatal("I-10: constructed a recipient from a plugin identity")
+		t.Fatal("constructed a recipient from a plugin identity")
 	}
 	if n := len(fakeplugin.Invocations(t)); n != 0 {
 		t.Fatalf("plugin invocations = %d, want 0", n)
@@ -640,7 +640,7 @@ func TestSplitNoRecipientFromIdentity(t *testing.T) {
 		if !ok || sel.Sel.Name != "Recipient" {
 			return true
 		}
-		t.Errorf("%s: identity .Recipient() (I-10)", fset.Position(call.Pos()))
+		t.Errorf("%s: identity .Recipient()", fset.Position(call.Pos()))
 		return true
 	})
 }

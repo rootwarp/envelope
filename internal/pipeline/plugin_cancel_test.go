@@ -171,8 +171,8 @@ func TestBindCancelledPromptStopsPluginWalk(t *testing.T) {
 func TestProgrammaticCancelRefusedBeforePlugin(t *testing.T) {
 	skipWindows(t)
 	// Unwrap polls no context: a deadline cannot interrupt a blocked plugin
-	// read. FR-YK-13 refuses the run before any identity-side plugin starts
-	// rather than starting one and hoping a cancel unblocks it.
+	// read. The run is refused before any identity-side plugin starts rather
+	// than starting one and hoping a cancel unblocks it.
 	name := "envtest"
 	fakeplugin.Install(t, name)
 
@@ -303,7 +303,7 @@ func TestSplitS9FailureRemovesAlreadyWrittenShards(t *testing.T) {
 		Terminal:     stubTerm{},
 	}, io.Discard)
 	if err == nil {
-		t.Fatal("err = nil, want S9 failure")
+		t.Fatal("err = nil, want pin-unwrap failure")
 	}
 	assertNoShardOrManifest(t, out)
 	assertNoPartialIn(t, out)

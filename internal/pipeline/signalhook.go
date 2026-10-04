@@ -13,7 +13,7 @@ import (
 //
 // Two park points, both waiting on ctx (the process signal.NotifyContext):
 //   - after restore's first plaintext write, so a signal sent once .partial
-//     exists always lands mid-copy (PRD E1, O17);
+//     exists always lands mid-copy;
 //   - inside a plugin PIN prompt (the fake's RequestValue → Terminal.ReadLine),
 //     so a signal sent while the plugin is waiting always lands in that window.
 //

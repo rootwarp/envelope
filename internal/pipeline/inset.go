@@ -22,8 +22,8 @@ import (
 var ErrConflictingManifests = errors.New("conflicting manifests")
 
 // inDir is one resolved -in directory. given is exactly what the operator
-// typed; every diagnostic is built from it (FR-MD-08). Identity is
-// st_dev/st_ino via os.SameFile, never the string (AD-2).
+// typed; every diagnostic is built from it. Identity is st_dev/st_ino via
+// os.SameFile, never the string.
 type inDir struct {
 	given string
 	info  os.FileInfo // nil for the single-directory case, which is not stat'ed
@@ -32,11 +32,11 @@ type inDir struct {
 // resolveInDirs de-duplicates by identity (os.SameFile), not by string, and
 // with two or more directories checks each one before anything is read.
 // With exactly one directory nothing is checked: Phase 1 surfaces the case as
-// ErrNoManifest and FR-MD-05 freezes that message.
+// ErrNoManifest, and that message stays frozen.
 func resolveInDirs(given []string) ([]inDir, error) {
-	// I7: this is not an optimisation. Phase 1 surfaces a bad single -in as
+	// This is not an optimisation. Phase 1 surfaces a bad single -in as
 	// ErrNoManifest naming the path; an earlier Stat would replace that frozen
-	// message (FR-MD-05). info is legitimately nil; nothing calls SameFile on it.
+	// message. info is legitimately nil; nothing calls SameFile on it.
 	if len(given) == 1 {
 		return []inDir{{given: given[0]}}, nil
 	}
@@ -49,7 +49,7 @@ func resolveInDirs(given []string) ([]inDir, error) {
 		if !fi.IsDir() {
 			return nil, fmt.Errorf("-in %s: not a directory", g)
 		}
-		// Mode 0000 passes Stat; the open is what rejects it (FR-MD-07).
+		// Mode 0000 passes Stat; the open is what rejects it.
 		d, err := os.Open(g)
 		if err != nil {
 			return nil, fmt.Errorf("-in %s: %w", g, err)
@@ -126,7 +126,7 @@ type memberRef struct {
 //  3. Version dispatch and MAC-key resolution happen per representative,
 //     after decryption. A blob's version is unknown until it is decrypted, so
 //     resolving a key up front is forbidden — it is exactly what would break
-//     FR-YK-03's lazy KeyFor promise. A v1 representative in a mixed run is
+//     the lazy KeyFor promise. A v1 representative in a mixed run is
 //     opened, and opening it consults no pin and costs no card.
 //
 // order[i] is candidate i. That slice is the only record of positions.
@@ -156,7 +156,7 @@ func groupCandidates(cands []manifestCandidate) ([]manifestGroup, []memberRef) {
 	return groups, order
 }
 
-// chooseManifest applies FR-MD-03. Two authenticated manifests agree iff their
+// Two authenticated manifests agree iff their
 // MACs are equal: both were verified against the same key, and macInput covers
 // exactly the fields that influence restore, so MAC equality is decoded-field
 // equality without comparing the randomized .age blobs.
@@ -247,7 +247,7 @@ func chooseManifest(groups []manifestGroup, order []memberRef, src manifest.MACK
 }
 
 // Branch on multi, not len(searched): the same flag as every other format
-// decision (AD-11). searched[0] is safe because openShardSet rejects empty InDirs.
+// decision. searched[0] is safe because openShardSet rejects empty InDirs.
 func noManifestErr(multi bool, searched []string) error {
 	if !multi {
 		return fmt.Errorf("%w: %s", ErrNoManifest, searched[0])
@@ -255,7 +255,17 @@ func noManifestErr(multi bool, searched []string) error {
 	return fmt.Errorf("%w: searched %s", ErrNoManifest, strings.Join(searched, ", "))
 }
 
-// selectShards is the single selection pass of FR-MD-04. scanAll makes verify
+// slotReject is why a slot's first rejected copy was rejected.
+// rejectNone is the zero value, so an untouched slot stays unset.
+type slotReject uint8
+
+const (
+	rejectNone slotReject = iota
+	rejectUnusable
+	rejectDigest
+)
+
+// selectShards is the single selection pass. scanAll makes verify
 // examine every copy of every slot; restore stops at the first usable one.
 //
 // Reporting keeps Phase 1's two-phase ORDER — every "unusable" line, then every
@@ -267,8 +277,7 @@ func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanA
 		path  string
 	}
 	var unusableLines, digestLines []reject
-	// slotReason: 0 none, 1 unusable first, 2 digest first
-	slotReason := make([]int, m.N)
+	slotReason := make([]slotReject, m.N)
 
 	for i := 0; i < m.N; i++ {
 		present := false
@@ -277,25 +286,25 @@ func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanA
 				break
 			}
 			p := filepath.Join(d.given, shardFileName(i))
-			b, miss, unusable, rerr := loadShard(ctx, p, m.StripeLen)
+			b, read, rerr := loadShard(ctx, p, m.StripeLen)
 			if rerr != nil {
 				return nil, nil, nil, rerr
 			}
-			if miss {
+			if read == shardAbsent {
 				continue
 			}
 			present = true
-			if unusable {
+			if read == shardUnusable {
 				unusableLines = append(unusableLines, reject{i, p})
-				if slotReason[i] == 0 {
-					slotReason[i] = 1
+				if slotReason[i] == rejectNone {
+					slotReason[i] = rejectUnusable
 				}
 				continue
 			}
 			if !bytes.Equal(erasure.Digest(b), m.Digests[i]) {
 				digestLines = append(digestLines, reject{i, p})
-				if slotReason[i] == 0 {
-					slotReason[i] = 2
+				if slotReason[i] == rejectNone {
+					slotReason[i] = rejectDigest
 				}
 				continue
 			}
@@ -323,15 +332,15 @@ func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanA
 	emit(unusableLines, "unusable shard at index %d")
 	// Two loops: FailedIndex is grouped by reason (every unusable slot, then
 	// every digest slot), matching Phase 1 stderr order. Merging them into
-	// one index-order loop would change single-in FailedIndex and stderr (I3).
+	// one index-order loop would change single-in FailedIndex and stderr.
 	for i := 0; i < m.N; i++ {
-		if shards[i] == nil && slotReason[i] == 1 {
+		if shards[i] == nil && slotReason[i] == rejectUnusable {
 			failed = append(failed, i)
 		}
 	}
 	emit(digestLines, "failed digest at index %d")
 	for i := 0; i < m.N; i++ {
-		if shards[i] == nil && slotReason[i] == 2 {
+		if shards[i] == nil && slotReason[i] == rejectDigest {
 			failed = append(failed, i)
 		}
 	}

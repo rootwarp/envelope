@@ -15,7 +15,7 @@ import (
 	"github.com/rootwarp/envelope/internal/key"
 )
 
-// FR-P2-13
+// Healthy, degraded, damaged, and unrestorable verify results.
 func TestVerifyResultClasses(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -167,7 +167,7 @@ func TestVerifyResultClasses(t *testing.T) {
 	}
 }
 
-// FR-P2-13 "tampered after reconstruction"
+// Payload tampered after reconstruction.
 func TestVerifyPayloadTamper(t *testing.T) {
 	restore, _, _ := splitSized(t, 4096)
 	testAtJoin = func(ct []byte, _ int64) {
@@ -208,7 +208,7 @@ func TestVerifyPayloadTamper(t *testing.T) {
 	}
 }
 
-// FR-P2-13 "nothing is written, anywhere"
+// Nothing is written, anywhere.
 func TestVerifyWritesNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -161,10 +161,11 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	}
 
 	if !v1 {
-		// S9 is the only legal pin-unwrap slot: after payload encrypt (FR-YK-05)
-		// and before the first shard write (FR-YK-04). A plugin-prompt
-		// interruption is an S9 error: shards written before this return
-		// (none, unless a test injected them) must not survive.
+		// This is the only point where the pin may be unwrapped: after the
+		// payload is encrypted to the recorded recipients and before the
+		// first shard is written. An interrupted plugin prompt here must
+		// leave no shard behind: shards written before this return (none,
+		// unless a test injected them) must not survive.
 		if err := refuseInteractiveWithoutTerminal(set); err != nil {
 			removeIncompleteSplit(opts.OutDir)
 			return nil, err
@@ -267,7 +268,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 }
 
 // testFailManifestWrite, when set, runs after shards are on disk and before
-// manifest.age is created. Tests inject a crash between S10 and S12.
+// manifest.age is created. Tests inject a crash in that window.
 var testFailManifestWrite func() error
 
 // testAtCiphertext observes the ciphertext after Encrypt. Tests record its
@@ -425,10 +426,10 @@ func mkdirAllDurable(path string, perm os.FileMode) error {
 }
 
 var (
-	ErrOutDirNotEmpty   = errors.New("output directory is not empty")                  // FR-31
-	ErrPartialExists    = errors.New("a .partial file from a previous run is present") // FR-33
-	ErrNoManifest       = errors.New("no manifest.age in the shard directory")         // FR-12, FR-26
-	ErrStaleManifest    = errors.New("no shard matched the manifest")                  // FR-26
+	ErrOutDirNotEmpty   = errors.New("output directory is not empty")
+	ErrPartialExists    = errors.New("a .partial file from a previous run is present")
+	ErrNoManifest       = errors.New("no manifest.age in the shard directory")
+	ErrStaleManifest    = errors.New("no shard matched the manifest")
 	ErrDirSync          = errors.New("output written but directory could not be synced")
 	ErrManifestTooLarge = errors.New("manifest.age exceeds size limit")
 )

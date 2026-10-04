@@ -80,7 +80,7 @@ func TestRestoreTwoIdentityPaths(t *testing.T) {
 	if _, err := key.Create(other); err != nil {
 		t.Fatal(err)
 	}
-	// First path is the owner; YK-08 will try later identities on decrypt.
+	// The first path owns this shard set. Listing another identity after it must still restore.
 	restore.IdentityPaths = []string{restore.IdentityPaths[0], other}
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)

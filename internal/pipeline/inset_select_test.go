@@ -13,7 +13,7 @@ import (
 )
 
 // scatter copies shard i into dirs[i % len(dirs)] and a manifest into each.
-// Shared by restore and verify tests (NFR-MD-4).
+// Shared by restore and verify tests.
 func scatter(t *testing.T, srcDir string, d int) []string {
 	t.Helper()
 	root := t.TempDir()
@@ -127,7 +127,7 @@ func verifyDirs(t *testing.T, restore RestoreOptions, status io.Writer) (*Verify
 	}, status)
 }
 
-// FR-MD-04: per-slot aggregation across directories.
+// Per-slot aggregation across directories.
 func TestSlotStateAggregation(t *testing.T) {
 	restore, split := splitFixture(t)
 	src := split.OutDir
@@ -208,7 +208,7 @@ func TestSlotStateAggregation(t *testing.T) {
 	})
 }
 
-// FR-MD-04: a slot rotten in every directory is listed once.
+// A slot rotten in every directory is listed once.
 func TestSlotRottenEverywhereListedOnce(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirA := cloneSplitDir(t, split.OutDir, split.N)
@@ -258,7 +258,7 @@ func TestSlotRottenEverywhereListedOnce(t *testing.T) {
 	}
 }
 
-// FR-MD-04: identical output whatever the distribution.
+// Identical output whatever the distribution.
 func TestScatteredRestoreMatchesGathered(t *testing.T) {
 	restore, split := splitFixture(t)
 	gathered := restore
@@ -298,9 +298,9 @@ func TestScatteredRestoreMatchesGathered(t *testing.T) {
 	}
 }
 
-// NFR-MD-2 / FR-MD-04 I6: a rejected candidate is never assigned, so the slot
-// can be rescued and FailedIndex stays empty. This is a proxy for I6 (peak
-// memory independent of d), not a pin — an implementation that accumulated
+// A rejected candidate is never assigned, so the slot can be rescued and
+// FailedIndex stays empty. This is a proxy for peak memory staying independent
+// of the directory count, not a pin — an implementation that accumulated
 // every candidate in a slice would still pass.
 func TestRejectedCandidateNotRetained(t *testing.T) {
 	restore, split := splitFixture(t)
@@ -348,7 +348,7 @@ func TestRejectedCandidateNotRetained(t *testing.T) {
 	assertVerifySlotClasses(t, rrep, vrep)
 }
 
-// NFR-MD-3: Restore and Verify leave every -in directory unchanged.
+// Restore and Verify leave every -in directory unchanged.
 func TestInDirsUnchanged(t *testing.T) {
 	restore, split := splitFixture(t)
 	dirs := scatter(t, split.OutDir, 3)
@@ -369,7 +369,7 @@ func TestInDirsUnchanged(t *testing.T) {
 	assertTreeUnchanged(t, before, snapshotTree(t, root))
 }
 
-// FR-MD-04 X-MD-3: five directories, two emptied, restore matches the original.
+// Five directories, two emptied, restore matches the original.
 func TestFiveDirsTwoEmptied(t *testing.T) {
 	restore, split := splitFixture(t)
 	want, err := os.ReadFile(split.InPath)
@@ -407,5 +407,52 @@ func TestFiveDirsTwoEmptied(t *testing.T) {
 	assertVerifySlotClasses(t, rrep, vrep)
 	if vrep.Result != VerifyDegraded {
 		t.Fatalf("Result = %s, want degraded", vrep.Result)
+	}
+}
+
+// TestShardRejectionReasonMapping pins the three-way ordinals that used to be
+// bare ints. slotReject was 0 none, 1 unusable-first, 2 digest-first.
+// shardRead was loadShard's (missing, unusable) pair: loaded is neither,
+// absent is missing only, unusable is unusable only.
+func TestShardRejectionReasonMapping(t *testing.T) {
+	for _, tc := range []struct {
+		reason slotReject
+		want   uint8
+	}{
+		{rejectNone, 0},
+		{rejectUnusable, 1},
+		{rejectDigest, 2},
+	} {
+		if uint8(tc.reason) != tc.want {
+			t.Fatalf("slotReject %d, want %d", tc.reason, tc.want)
+		}
+	}
+	var zeroSlot slotReject
+	if zeroSlot != rejectNone {
+		t.Fatalf("zero slotReject = %d, want rejectNone", zeroSlot)
+	}
+
+	for _, tc := range []struct {
+		read     shardRead
+		want     uint8
+		missing  bool
+		unusable bool
+	}{
+		{shardLoaded, 0, false, false},
+		{shardAbsent, 1, true, false},
+		{shardUnusable, 2, false, true},
+	} {
+		if uint8(tc.read) != tc.want {
+			t.Fatalf("shardRead %d, want %d", tc.read, tc.want)
+		}
+		missing := tc.read == shardAbsent
+		unusable := tc.read == shardUnusable
+		if missing != tc.missing || unusable != tc.unusable {
+			t.Fatalf("shardRead %d: missing=%v unusable=%v, want %v %v", tc.read, missing, unusable, tc.missing, tc.unusable)
+		}
+	}
+	var zeroRead shardRead
+	if zeroRead != shardLoaded {
+		t.Fatalf("zero shardRead = %d, want shardLoaded", zeroRead)
 	}
 }

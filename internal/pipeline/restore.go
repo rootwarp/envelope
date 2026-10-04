@@ -26,11 +26,17 @@ type RestoreOptions struct {
 // RestoreReport carries counts, indices and paths only. No field may ever hold
 // payload bytes.
 type RestoreReport struct {
-	OutPath      string
-	K, N         int
-	Usable       int
-	FailedIndex  []int // digest mismatches, index order
-	MissingIndex []int // absent shard files, index order
+	OutPath string
+	K, N    int
+	Usable  int
+	// FailedIndex lists every slot that had a shard file but no usable copy.
+	// It is grouped by the reason the slot's first copy was rejected —
+	// first the slots whose copy was not a usable regular file of the
+	// authenticated stripe length, then the slots whose copy failed its
+	// digest — and is in index order within each group, matching the order
+	// of the stderr lines.
+	FailedIndex  []int
+	MissingIndex []int // slots with no shard file in any -in directory, index order
 	PlaintextLen int64
 }
 
@@ -92,7 +98,7 @@ type shardSet struct {
 	failed  []int
 	missing []int
 	have    int
-	multi   bool // I4: true after dedup when two or more distinct directories remain
+	multi   bool // true after dedup when two or more distinct directories remain
 }
 
 // ManifestKeys, not the Set. The Set's v1 key is an existence probe over the
@@ -111,8 +117,9 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if err != nil {
 		return nil, err
 	}
-	// I4: format decisions follow the deduplicated list, never len(inDirs).
-	// Two spellings of one directory must stay single-directory output (FR-MD-06, AD-3).
+	// Every output-format decision follows the deduplicated directory list,
+	// never len(inDirs): two spellings of one directory must still produce
+	// single-directory output.
 	multi := len(dirs) > 1
 
 	// Blobs are read BEFORE LoadSet so ErrNoManifest and the manifest read
@@ -139,8 +146,8 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if err != nil {
 		return nil, err
 	}
-	// Plugin-only: refuse with no TTY before any age-plugin-* process (FR-YK-13).
-	// A native-with-scalar set never opens the terminal here (YK-08 decrypts natives first).
+	// Plugin-only: refuse with no TTY before any age-plugin-* process.
+	// A native-with-scalar set never opens the terminal here; natives are decrypted first.
 	if err := refuseInteractiveWithoutTerminal(keys); err != nil {
 		keys.Zero()
 		return nil, err
@@ -160,8 +167,8 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 			keys.Zero()
 		}
 	}()
-	// R5: every term is known (d from groups, p from the set, q from the
-	// pin record) and no plugin identity has been tried yet.
+	// Every term of the budget is known (d from groups, p from the set, q from
+	// the pin record) and no plugin identity has been tried yet.
 	announceInteractionBudget(status, len(dirs), groups, keys)
 	// Eager v1 scalar derivation keeps plugin-only v1 restores failing
 	// closed with ErrNoScalar and zero invocations. A pin-bearing set
@@ -190,7 +197,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	}
 
 	// Positional: compacting survivors makes ReconstructData and Join both
-	// return nil while emitting a different SHA-256. FR-15.
+	// return nil while emitting a different SHA-256.
 	shards, failed, missing, err := selectShards(ctx, m, dirs, scanAll, multi, status)
 	if err != nil {
 		return nil, err
@@ -213,8 +220,8 @@ func (s *shardSet) usableErr() error {
 		tf := &erasure.TooFewShardsError{Need: s.m.K, Have: s.have}
 		if s.have == 0 {
 			// MAC binds the owner, not a point in time; every current shard
-			// screens as corrupt. Wrap so M7.2 can name the diagnosis without
-			// a type change. Plan R6.
+			// screens as corrupt. Wrap ErrStaleManifest so callers can name
+			// this diagnosis with errors.Is.
 			return fmt.Errorf("%d of %d shards matched the manifest — the manifest may not belong to this shard set.: %w: %w",
 				s.have, s.m.N, tf, ErrStaleManifest)
 		}
@@ -246,33 +253,43 @@ func (s *shardSet) ciphertext() ([]byte, error) {
 	return ct.Bytes(), nil
 }
 
-func loadShard(ctx context.Context, path string, stripeLen int64) (data []byte, missing, unusable bool, err error) {
+// shardRead is what loadShard found at one path. A cancelled context returns
+// a non-nil error and shardLoaded; callers must check the error first.
+type shardRead uint8
+
+const (
+	shardLoaded shardRead = iota
+	shardAbsent
+	shardUnusable
+)
+
+func loadShard(ctx context.Context, path string, stripeLen int64) ([]byte, shardRead, error) {
 	if testAtLoadShard != nil {
 		testAtLoadShard(path)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, false, false, err
+		return nil, shardLoaded, err
 	}
 	f, err := os.OpenFile(path, readOpenFlags, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, true, false, nil
+			return nil, shardAbsent, nil
 		}
-		return nil, false, true, nil
+		return nil, shardUnusable, nil
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, false, true, nil
+		return nil, shardUnusable, nil
 	}
 	if !st.Mode().IsRegular() || st.Size() != stripeLen {
-		return nil, false, true, nil
+		return nil, shardUnusable, nil
 	}
 	b, err := io.ReadAll(io.LimitReader(f, stripeLen+1))
 	if err != nil || int64(len(b)) != stripeLen {
-		return nil, false, true, nil
+		return nil, shardUnusable, nil
 	}
-	return b, false, false, nil
+	return b, shardLoaded, nil
 }
 
 func readManifestBlob(path string) ([]byte, error) {
@@ -330,7 +347,7 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set
 	}()
 
 	// 0600 survives every realistic umask and O_EXCL removes the existing-file
-	// case, so this is belt — but FR-18 names it.
+	// case, so this chmod is belt and suspenders.
 	if err = f.Chmod(0o600); err != nil {
 		return 0, err
 	}
@@ -392,7 +409,7 @@ func syncDir(dir string) error {
 }
 
 // ctxReader makes a copy observe cancellation, so a SIGINT turns into an
-// ordinary read error and FR-18's existing deferred cleanup removes .partial.
+// ordinary read error and the deferred cleanup removes .partial.
 func ctxReader(ctx context.Context, r io.Reader) io.Reader {
 	return &contextReader{ctx: ctx, r: r}
 }
@@ -417,7 +434,7 @@ var ObserveOpenInteractions func(int)
 
 // ObserveRunInteractions receives the identity-side Unwrap count at the end
 // of Restore or Verify (and of a failed openShardSet), before Zero. Tests
-// assert I-21: Interactions() ≤ the announced bound, including identities
+// assert Interactions() stays within the announced bound, including identities
 // tried and rejected. Production does not branch on the value.
 var ObserveRunInteractions func(int)
 

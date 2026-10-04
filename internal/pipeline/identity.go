@@ -14,8 +14,8 @@ import (
 // cmd/envelope may not import internal/key (D7), so this alias is the injection type.
 type Terminal = key.Terminal
 
-// ErrNoPinTerminal is the FR-YK-13 refusal: no controlling terminal, and this
-// identity would need to prompt. The /dev/tty open failing is the detection.
+// ErrNoPinTerminal is the refusal when there is no controlling terminal and
+// this identity would need to prompt. The /dev/tty open failing is the detection.
 // Never block, never retry, never fall back to stdin — which may be the payload.
 var ErrNoPinTerminal = errors.New("this identity needs a PIN and there is no terminal to ask on")
 
@@ -80,8 +80,8 @@ func identitySource(s *key.Set, paths []string) string {
 	return firstIdentityPath(paths)
 }
 
-// refuseInteractiveWithoutTerminal fails closed before a plugin process starts
-// (FR-YK-13). A native identity with a scalar never opens the terminal, so a
+// refuseInteractiveWithoutTerminal fails closed before a plugin process starts.
+// A native identity with a scalar never opens the terminal, so a
 // mixed set still restores a v1 shard set with zero plugin interactions.
 // The preflight resolves the run's handle and closes nothing.
 func refuseInteractiveWithoutTerminal(s *key.Set) error {
@@ -121,11 +121,11 @@ func noteFirstPlugin(s *key.Set, status io.Writer) {
 	}
 }
 
-// announceInteractionBudget writes the §6.3 best-case and bound through
-// the existing status writer before any plugin identity is tried. Gated on
-// Interactive so a v1 or file-identity run's stderr stays byte-identical
-// (I-11). Production does not consult Interactions(); that counter is the
-// I-21 test instrument.
+// announceInteractionBudget writes the interaction budget (best case and
+// upper bound) through the existing status writer before any plugin identity
+// is tried. Gated on Interactive so a v1 or file-identity run's stderr stays
+// byte-identical. Production does not consult Interactions(); that counter is
+// the test instrument for the announced bound.
 func announceInteractionBudget(status io.Writer, nDirs int, groups []manifestGroup, keys *key.Set) {
 	if status == nil || keys == nil || !keys.Interactive() {
 		return
@@ -153,7 +153,7 @@ func announceInteractionBudget(status io.Writer, nDirs int, groups []manifestGro
 	fmt.Fprintln(status, msg)
 }
 
-// budgetMessage is the operator-visible §6.3 line. The bound form is only
+// budgetMessage is the operator-visible interaction-budget line. The bound form is only
 // for p>1: with one plugin identity the two figures coincide. The
 // directory/copy preamble is a separate line only when more than one
 // directory or more than one distinct copy is in play.

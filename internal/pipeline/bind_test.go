@@ -666,11 +666,11 @@ func TestBindModifyDoesNotMintSeed(t *testing.T) {
 				return true
 			}
 			if sel.Sel.Name == "NewBundle" {
-				t.Errorf("%s calls NewBundle (I-3)", fn.Name.Name)
+				t.Errorf("%s calls NewBundle", fn.Name.Name)
 			}
 			id, ok := sel.X.(*ast.Ident)
 			if ok && id.Name == "rand" && sel.Sel.Name == "Read" {
-				t.Errorf("%s reads rand (I-3)", fn.Name.Name)
+				t.Errorf("%s reads rand", fn.Name.Name)
 			}
 			return true
 		})

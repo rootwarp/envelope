@@ -19,7 +19,7 @@ import (
 	"github.com/rootwarp/envelope/internal/manifest"
 )
 
-// I-1: committed v1 shard set. Pipeline umask tests are process-global, so no t.Parallel.
+// Committed v1 shard set. Pipeline umask tests are process-global, so no t.Parallel.
 
 var goldenV1Names = []string{
 	"shard-00", "shard-01", "shard-02", "shard-03", "shard-04",
@@ -130,7 +130,7 @@ func TestGoldenV1ShardSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	if set.Interactions() != 0 {
-		t.Fatalf("I-1: v1 golden decrypt Interactions = %d, want 0", set.Interactions())
+		t.Fatalf("v1 golden decrypt Interactions = %d, want 0", set.Interactions())
 	}
 	if m.Version != 1 || m.K != 3 || m.N != 5 {
 		t.Fatalf("manifest Version=%d k=%d n=%d, want 1 3 5", m.Version, m.K, m.N)
@@ -183,7 +183,7 @@ func TestGoldenV1ShardSet(t *testing.T) {
 	}
 }
 
-// I-11: a non-interactive v1 multi-directory run is byte-identical to 58ed8bd.
+// A non-interactive v1 multi-directory run is byte-identical to the capture at 58ed8bd.
 // Capture produced by that binary over the committed v1 shard set copied to
 // a/ and c/ with b/manifest.age a directory — not a freshly computed expectation.
 func TestGoldenV1MultiDirCapture(t *testing.T) {
@@ -260,7 +260,7 @@ func materialiseGoldenIdentity(t *testing.T, goldenDir string) string {
 	if len(data) == 0 || data[0] == '1' {
 		t.Fatal("identity.bech32data is empty or begins with 1")
 	}
-	// FR-24: assemble the identity line only in t.TempDir().
+	// Assemble the identity line only in t.TempDir().
 	line := key.HRP + "1" + string(data) + "\n"
 	path := filepath.Join(t.TempDir(), "identity.txt")
 	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {

@@ -37,7 +37,7 @@ func TestRestoreNoManifest(t *testing.T) {
 	assertNoOutOrPartial(t, restore.OutPath)
 }
 
-// FR-MD-02 InDirs
+// A nil or empty -in list is rejected before any directory is read.
 func TestEmptyInDirsRejected(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "out.bin") // InDirs
 	for _, dirs := range [][]string{nil, {}} {       // InDirs

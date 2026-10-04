@@ -56,7 +56,7 @@ func assertRescued(t *testing.T, restore RestoreOptions, dirA, dirB, wantLine st
 	}
 }
 
-// FR-MD-04: a later directory can fill a slot the first directory rejected.
+// A later directory can fill a slot the first directory rejected.
 func TestSlotRescuedByLaterDirectory(t *testing.T) {
 	restore, split := splitFixture(t)
 	unsc := restore
@@ -86,9 +86,9 @@ func TestSlotRescuedByLaterDirectory(t *testing.T) {
 	})
 }
 
-// FR-MD-06 I3 I4: duplicates collapse, and the deduplicated list is what
-// decides whether diagnostics carry a path. FIFO at 3 and a flipped bit at 2
-// pin reason-group order (unusable then digest), not index order.
+// Duplicates collapse, and the deduplicated list is what decides whether
+// diagnostics carry a path. FIFO at 3 and a flipped bit at 2 pin
+// reason-group order (unusable then digest), not index order.
 func TestDuplicateDirsAreSingleDirectoryBehaviour(t *testing.T) {
 	restore, split := splitFixture(t)
 	src := split.OutDir

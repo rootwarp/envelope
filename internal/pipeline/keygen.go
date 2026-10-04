@@ -12,7 +12,7 @@ type KeygenOptions struct {
 }
 
 func Keygen(opts KeygenOptions, status io.Writer) error {
-	// FR-27: silent by default; do not invent a status line.
+	// keygen prints nothing on success; do not add a status line.
 	id, err := key.Create(opts.IdentityPath)
 	if err != nil {
 		return err

@@ -90,7 +90,7 @@ func TestInteractionBudget(t *testing.T) {
 		assertBudgetBeforePlugin(t, catch)
 		best, bound := assertI21(t, st, n)
 		if best != 3 || bound != 3 || n != 3 {
-			t.Fatalf("restore I-21 best=%d bound=%d measured=%d, want 3 3 3", best, bound, n)
+			t.Fatalf("restore budget best=%d bound=%d measured=%d, want 3 3 3", best, bound, n)
 		}
 		if strings.Contains(st, "up to") {
 			t.Fatalf("restore shape (a) has up to:\n%s", st)
@@ -309,7 +309,7 @@ func assertI21(t *testing.T, status string, measured int) (best, bound int) {
 	}
 	best, bound = parseAnnounced(t, status)
 	if measured > bound {
-		t.Fatalf("I-21: Interactions() = %d > announced bound %d (best %d)\n%s", measured, bound, best, status)
+		t.Fatalf("Interactions() = %d > announced bound %d (best %d)\n%s", measured, bound, best, status)
 	}
 	return best, bound
 }
