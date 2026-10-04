@@ -176,16 +176,16 @@ func TestProgrammaticCancelRefusedBeforePlugin(t *testing.T) {
 	name := "envtest"
 	fakeplugin.Install(t, name)
 
-	testOpenTerminal = func() (Terminal, error) {
+	noTerm := deps{openTerminal: func() (Terminal, error) {
 		return nil, key.ErrNoTerminal
-	}
-	t.Cleanup(func() { testOpenTerminal = nil })
+	}}
 
 	t.Run("restore", func(t *testing.T) {
 		restore, _ := splitFixture(t)
 		restore.IdentityPaths = []string{writePluginIdentity(t, name, fakeplugin.ModePIN)}
 		restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
 		restore.Terminal = nil
+		restore.deps = noTerm
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -240,6 +240,7 @@ func TestProgrammaticCancelRefusedBeforePlugin(t *testing.T) {
 				OutDir:       out,
 				K:            3,
 				N:            5,
+				deps:         noTerm,
 			}, io.Discard)
 			errc <- err
 		}()

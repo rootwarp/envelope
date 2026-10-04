@@ -750,8 +750,7 @@ func writePluginStub(t *testing.T, name string, mode fakeplugin.Mode) string {
 
 func mustLoadBundle(t *testing.T, path string, term Terminal) *key.Set {
 	t.Helper()
-	src := terminalSource(term)
-	set, err := key.LoadSet([]string{path}, src)
+	set, err := key.LoadSet([]string{path}, key.Borrow(term))
 	if err != nil {
 		t.Fatal(err)
 	}

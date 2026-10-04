@@ -94,10 +94,6 @@ func TestSIGINTPluginPromptSplit(t *testing.T) {
 
 func mustPluginBundle(t *testing.T, name string) string {
 	t.Helper()
-	prev := testTerminal
-	testTerminal = pinTerm{}
-	t.Cleanup(func() { testTerminal = prev })
-
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "stub.txt")
 	if err := os.WriteFile(stub, []byte(fakeplugin.Identity(name, fakeplugin.ModePIN)+"\n"), 0o600); err != nil {
@@ -105,7 +101,7 @@ func mustPluginBundle(t *testing.T, name string) string {
 	}
 	rec := fakeplugin.Recipient(name, fakeplugin.ModeOK)
 	bundle := filepath.Join(dir, "bundle.txt")
-	mustRun(t, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
+	mustRunTerm(t, pinTerm{}, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
 	return bundle
 }
 
@@ -116,7 +112,7 @@ func mustPluginBundleSplit(t *testing.T, name string) (bundle, shards string) {
 	in := filepath.Join(dir, "in.bin")
 	writeOpaque(t, in, 32)
 	shards = filepath.Join(dir, "shards")
-	mustRun(t, "split", "-identity", bundle, "-in", in, "-out", shards, "-k", "3", "-n", "5")
+	mustRunTerm(t, pinTerm{}, "split", "-identity", bundle, "-in", in, "-out", shards, "-k", "3", "-n", "5")
 	return bundle, shards
 }
 

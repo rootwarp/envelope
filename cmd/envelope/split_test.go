@@ -63,8 +63,7 @@ func TestSplitBindRestoreCmp(t *testing.T) {
 	skipWindows(t)
 	name := "envtest"
 	fakeplugin.Install(t, name)
-	testTerminal = stubTerm{}
-	t.Cleanup(func() { testTerminal = nil })
+	term := stubTerm{}
 
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "stub.txt")
@@ -73,7 +72,7 @@ func TestSplitBindRestoreCmp(t *testing.T) {
 	}
 	rec := fakeplugin.Recipient(name, fakeplugin.ModeOK)
 	bundle := filepath.Join(dir, "bundle.txt")
-	mustRun(t, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
+	mustRunTerm(t, term, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
 
 	in := filepath.Join(dir, "in.bin")
 	writeOpaque(t, in, 1<<20)
@@ -82,14 +81,14 @@ func TestSplitBindRestoreCmp(t *testing.T) {
 		t.Fatal(err)
 	}
 	shards := filepath.Join(dir, "shards")
-	mustRun(t, "split", "-identity", bundle, "-in", in, "-out", shards, "-k", "3", "-n", "5")
+	mustRunTerm(t, term, "split", "-identity", bundle, "-in", in, "-out", shards, "-k", "3", "-n", "5")
 	for _, name := range []string{"shard-03", "shard-04"} {
 		if err := os.Remove(filepath.Join(shards, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out := filepath.Join(dir, "out.bin")
-	mustRun(t, "restore", "-identity", bundle, "-in", shards, "-out", out)
+	mustRunTerm(t, term, "restore", "-identity", bundle, "-in", shards, "-out", out)
 	got, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)

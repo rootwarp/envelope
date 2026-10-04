@@ -98,13 +98,14 @@ func TestHandlesTheRunOpenedAreClosedExactlyOnce(t *testing.T) {
 		if err := os.WriteFile(in, []byte("owned-split"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		snap := useCountingTerminal(t)
+		d, snap := countingDeps(t)
 		if _, err := Split(context.Background(), SplitOptions{
 			IdentityPath: bundle,
 			InPath:       in,
 			OutDir:       t.TempDir(),
 			K:            3,
 			N:            5,
+			deps:         d,
 		}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -113,11 +114,12 @@ func TestHandlesTheRunOpenedAreClosedExactlyOnce(t *testing.T) {
 
 	t.Run("restore", func(t *testing.T) {
 		bundle, shards := mustPINShards(t, answerTerm{})
-		snap := useCountingTerminal(t)
+		d, snap := countingDeps(t)
 		if _, err := Restore(context.Background(), RestoreOptions{
 			IdentityPaths: []string{bundle},
 			InDirs:        []string{shards},
 			OutPath:       filepath.Join(t.TempDir(), "out.bin"),
+			deps:          d,
 		}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -126,10 +128,11 @@ func TestHandlesTheRunOpenedAreClosedExactlyOnce(t *testing.T) {
 
 	t.Run("verify", func(t *testing.T) {
 		bundle, shards := mustPINShards(t, answerTerm{})
-		snap := useCountingTerminal(t)
+		d, snap := countingDeps(t)
 		if _, err := Verify(context.Background(), VerifyOptions{
 			IdentityPaths: []string{bundle},
 			InDirs:        []string{shards},
+			deps:          d,
 		}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -139,11 +142,12 @@ func TestHandlesTheRunOpenedAreClosedExactlyOnce(t *testing.T) {
 	t.Run("bind-add-recipient", func(t *testing.T) {
 		bundle := mustPINBundle(t, answerTerm{})
 		_, rec := mustNativeID(t)
-		snap := useCountingTerminal(t)
+		d, snap := countingDeps(t)
 		if _, err := Bind(context.Background(), BindOptions{
 			Mode:       BindAddRecipient,
 			Recipients: []string{rec},
 			BundlePath: bundle,
+			deps:       d,
 		}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
@@ -260,20 +264,18 @@ func (r *runTerm) Close() error {
 	return nil
 }
 
-func useCountingTerminal(t *testing.T) func() []*runTerm {
+func countingDeps(t *testing.T) (deps, func() []*runTerm) {
 	t.Helper()
 	var mu sync.Mutex
 	var opened []*runTerm
-	prev := testOpenTerminal
-	testOpenTerminal = func() (Terminal, error) {
+	d := deps{openTerminal: func() (Terminal, error) {
 		tm := &runTerm{}
 		mu.Lock()
 		opened = append(opened, tm)
 		mu.Unlock()
 		return tm, nil
-	}
-	t.Cleanup(func() { testOpenTerminal = prev })
-	return func() []*runTerm {
+	}}
+	return d, func() []*runTerm {
 		mu.Lock()
 		defer mu.Unlock()
 		out := make([]*runTerm, len(opened))

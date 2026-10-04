@@ -427,7 +427,7 @@ func resealV2(t *testing.T, bundle, src, dst string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := key.LoadSet([]string{bundle}, terminalSource(stubTerm{}))
+	set, err := key.LoadSet([]string{bundle}, key.Borrow(stubTerm{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func resealV2(t *testing.T, bundle, src, dst string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ui := key.NewClientUI(terminalSource(stubTerm{}))
+	ui := key.NewClientUI(key.Borrow(stubTerm{}))
 	rs, err := key.ParseRecipients(set.RecordedRecipients(), ui)
 	if err != nil {
 		t.Fatal(err)

@@ -40,18 +40,10 @@ var ErrNoTerminal = errors.New("this identity needs a terminal to prompt on")
 
 var _ Terminal = (*tty.Terminal)(nil)
 
-// Replaced in tests: native load/decrypt must never open /dev/tty.
-var openTTY = func() (Terminal, error) {
-	t, err := tty.Open()
-	if err != nil {
-		return nil, err
-	}
-	return t, nil
-}
-
-// OpenTerminal opens /dev/tty O_RDWR. ErrNoTerminal when it cannot be opened.
+// OpenTerminal opens /dev/tty. The caller owns the handle and closes it.
+// A Set receives a terminal only through Borrow, which does not take ownership.
 func OpenTerminal() (Terminal, error) {
-	t, err := openTTY()
+	t, err := tty.Open()
 	if err != nil {
 		return nil, ErrNoTerminal
 	}

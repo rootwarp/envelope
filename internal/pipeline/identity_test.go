@@ -52,10 +52,9 @@ func TestWrongIdentityNamesNativeSource(t *testing.T) {
 	restore.IdentityPaths = []string{pluginPath, wrong}
 	restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
 
-	testOpenTerminal = func() (Terminal, error) {
+	restore.deps = deps{openTerminal: func() (Terminal, error) {
 		return nil, key.ErrNoTerminal
-	}
-	t.Cleanup(func() { testOpenTerminal = nil })
+	}}
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, crypt.ErrWrongIdentity) {
@@ -103,11 +102,10 @@ func TestInteractiveWithoutTerminalRefused(t *testing.T) {
 	restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
 
 	opened := false
-	testOpenTerminal = func() (Terminal, error) {
+	restore.deps = deps{openTerminal: func() (Terminal, error) {
 		opened = true
 		return nil, key.ErrNoTerminal
-	}
-	t.Cleanup(func() { testOpenTerminal = nil })
+	}}
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, ErrNoPinTerminal) {
@@ -132,14 +130,12 @@ func TestVerifyInteractiveWithoutTerminalRefused(t *testing.T) {
 	restore, _ := splitFixture(t)
 	pluginPath := writePluginIdentity(t, name, fakeplugin.ModePIN)
 
-	testOpenTerminal = func() (Terminal, error) {
-		return nil, key.ErrNoTerminal
-	}
-	t.Cleanup(func() { testOpenTerminal = nil })
-
 	rep, err := Verify(context.Background(), VerifyOptions{
 		IdentityPaths: []string{pluginPath},
 		InDirs:        restore.InDirs,
+		deps: deps{openTerminal: func() (Terminal, error) {
+			return nil, key.ErrNoTerminal
+		}},
 	}, io.Discard)
 	if rep != nil {
 		t.Fatal("report is not nil")
@@ -160,11 +156,10 @@ func TestNativeWithPluginDoesNotOpenTerminal(t *testing.T) {
 	pluginPath := writePluginIdentity(t, name, fakeplugin.ModePIN)
 	restore.IdentityPaths = []string{restore.IdentityPaths[0], pluginPath}
 
-	testOpenTerminal = func() (Terminal, error) {
+	restore.deps = deps{openTerminal: func() (Terminal, error) {
 		t.Fatal("terminal opened for a native-first set")
 		return nil, key.ErrNoTerminal
-	}
-	t.Cleanup(func() { testOpenTerminal = nil })
+	}}
 
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)

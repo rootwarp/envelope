@@ -30,7 +30,7 @@ func (a *app) bindCommand() *cli.Command {
 }
 
 func (a *app) bindAction(ctx context.Context, c *cli.Command) error {
-	opts, err := bindOptions(c)
+	opts, err := a.bindOptions(c)
 	if err != nil {
 		return usageFail(a.stderr, usageBind, err)
 	}
@@ -41,7 +41,7 @@ func (a *app) bindAction(ctx context.Context, c *cli.Command) error {
 	return err
 }
 
-func bindOptions(c *cli.Command) (pipeline.BindOptions, error) {
+func (a *app) bindOptions(c *cli.Command) (pipeline.BindOptions, error) {
 	out := c.String("out")
 	identity := c.StringSlice("identity")
 	recipients := c.StringSlice("recipient")
@@ -67,7 +67,7 @@ func bindOptions(c *cli.Command) (pipeline.BindOptions, error) {
 		return pipeline.BindOptions{}, errBindFlags
 	}
 
-	opts := pipeline.BindOptions{Terminal: testTerminal}
+	opts := pipeline.BindOptions{Terminal: a.term}
 	switch {
 	case create:
 		opts.Mode = pipeline.BindCreate

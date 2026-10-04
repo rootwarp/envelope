@@ -38,26 +38,6 @@ func TestOpenTerminalNoControllingTerminal(t *testing.T) {
 	}
 }
 
-func TestOpenTerminalMapsOpenError(t *testing.T) {
-	orig := openTTY
-	t.Cleanup(func() { openTTY = orig })
-	openTTY = func() (Terminal, error) {
-		return nil, errors.New("injected")
-	}
-
-	start := time.Now()
-	got, err := OpenTerminal()
-	if time.Since(start) > 200*time.Millisecond {
-		t.Fatal("OpenTerminal blocked")
-	}
-	if !errors.Is(err, ErrNoTerminal) {
-		t.Fatalf("OpenTerminal: errors.Is(., ErrNoTerminal) = false")
-	}
-	if got != nil {
-		t.Fatal("OpenTerminal returned a terminal")
-	}
-}
-
 func TestSecretReadLineNotRecorded(t *testing.T) {
 	hidden := "s3cret-value"
 	rec := &recordingTerminal{replies: []string{hidden}}
@@ -86,15 +66,6 @@ func TestSecretReadLineNotRecorded(t *testing.T) {
 }
 
 func TestTerminalSourceLazyOnNativeIdentity(t *testing.T) {
-	orig := openTTY
-	t.Cleanup(func() { openTTY = orig })
-	openTTY = func() (Terminal, error) {
-		panic("terminal opened")
-	}
-	src := TerminalSource(func() (Terminal, error) {
-		panic("TerminalSource invoked")
-	})
-
 	path := filepath.Join(t.TempDir(), "identity.txt")
 	id, err := Create(path)
 	if err != nil {
@@ -102,23 +73,24 @@ func TestTerminalSourceLazyOnNativeIdentity(t *testing.T) {
 	}
 	t.Cleanup(id.Zero)
 
-	loaded, err := Load(path)
+	set, err := LoadSet([]string{path}, func() (Terminal, error) {
+		panic("TerminalSource invoked")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(loaded.Zero)
+	t.Cleanup(set.Zero)
 
 	plain := []byte("native-only")
-	ct, err := loaded.EncryptBytes(plain)
+	ct, err := set.Identities()[0].EncryptBytes(plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := loaded.DecryptBytes(ct)
+	got, err := set.DecryptBytes(ct)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertSameBytes(t, got, plain)
-	_ = src
 }
 
 type recordingTerminal struct {

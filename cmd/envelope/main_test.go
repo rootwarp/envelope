@@ -14,6 +14,7 @@ import (
 
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
+	"github.com/rootwarp/envelope/internal/pipeline"
 )
 
 func TestRunIsCallableWithBuffers(t *testing.T) {
@@ -677,7 +678,12 @@ func tamperManifestMAC(t *testing.T, identityPath, manPath string) {
 
 func mustRun(t *testing.T, args ...string) {
 	t.Helper()
-	code := run(args, io.Discard, io.Discard)
+	mustRunTerm(t, nil, args...)
+}
+
+func mustRunTerm(t *testing.T, term pipeline.Terminal, args ...string) {
+	t.Helper()
+	code := runWith(args, io.Discard, io.Discard, term)
 	if code != exitOK {
 		t.Fatalf("run %v: exit = %d", args, code)
 	}

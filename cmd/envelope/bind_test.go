@@ -333,9 +333,7 @@ func TestBindInteractionsCLI(t *testing.T) {
 	skipWindows(t)
 	name := "envtest"
 	fakeplugin.Install(t, name)
-	prev := testTerminal
-	testTerminal = stubTerm{}
-	t.Cleanup(func() { testTerminal = prev })
+	term := stubTerm{}
 
 	dir := t.TempDir()
 	stub := writePluginIdentity(t, name, fakeplugin.ModeOK)
@@ -345,26 +343,26 @@ func TestBindInteractionsCLI(t *testing.T) {
 	bundle := filepath.Join(dir, "bundle.txt")
 
 	before := len(fakeplugin.Invocations(t))
-	mustRun(t, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
+	mustRunTerm(t, term, "bind", "-identity", stub, "-recipient", rec, "-out", bundle)
 	if n := len(fakeplugin.Invocations(t)) - before; n != 0 {
 		t.Fatalf("create started %d plugin processes, want 0", n)
 	}
 
 	repl := writePluginIdentity(t, name, fakeplugin.ModePIN)
 	before = len(fakeplugin.Invocations(t))
-	mustRun(t, "bind", "-bundle", bundle, "-replace-identity", repl)
+	mustRunTerm(t, term, "bind", "-bundle", bundle, "-replace-identity", repl)
 	if n := len(fakeplugin.Invocations(t)) - before; n != 0 {
 		t.Fatalf("replace-identity started %d plugin processes, want 0", n)
 	}
 
 	pluginRec := fakeplugin.Recipient(name, fakeplugin.ModeOK)
 	pluginBundle := filepath.Join(dir, "plugin-bundle.txt")
-	mustRun(t, "bind", "-identity", stub, "-recipient", pluginRec, "-out", pluginBundle)
+	mustRunTerm(t, term, "bind", "-identity", stub, "-recipient", pluginRec, "-out", pluginBundle)
 	got := observePipelineBindSet(t)
 	other := filepath.Join(dir, "other.txt")
 	mustRun(t, "keygen", "-out", other)
 	recB := mustRecipient(t, other)
-	mustRun(t, "bind", "-bundle", pluginBundle, "-add-recipient", recB)
+	mustRunTerm(t, term, "bind", "-bundle", pluginBundle, "-add-recipient", recB)
 	if *got != 1 {
 		t.Fatalf("add-recipient Interactions = %d, want 1", *got)
 	}

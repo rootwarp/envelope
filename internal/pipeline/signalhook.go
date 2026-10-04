@@ -9,6 +9,19 @@ import (
 	"os"
 )
 
+// defaultDeps is this binary's seam set, and one of the four written
+// exceptions to passing deps in. The process is started by an exec'd test,
+// so nothing can hand it a value.
+func defaultDeps() deps {
+	return deps{
+		openTerminal: func() (Terminal, error) { return holdPrompt{}, nil },
+		captureCtx:   func(ctx context.Context) { parkedCtx = ctx },
+		wrapDst: func(ctx context.Context, w io.Writer) io.Writer {
+			return &holdAfterFirstWrite{ctx: ctx, w: w}
+		},
+	}
+}
+
 // Compiled only into the binary cmd/envelope's signal tests build.
 //
 // Two park points, both waiting on ctx (the process signal.NotifyContext):
@@ -26,9 +39,7 @@ import (
 // Never run go test -tags envelope_signaltest ./...: every in-process restore
 // and every plugin PIN prompt would park until go test's own timeout.
 func init() {
-	testWrapDst = func(ctx context.Context, w io.Writer) io.Writer { return &holdAfterFirstWrite{ctx: ctx, w: w} }
-	testCaptureCtx = func(ctx context.Context) { parkedCtx = ctx }
-	testOpenTerminal = func() (Terminal, error) { return holdPrompt{}, nil }
+	testWrapDst = defaultDeps().wrapDst
 }
 
 var parkedCtx context.Context

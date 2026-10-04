@@ -21,6 +21,7 @@ type RestoreOptions struct {
 	InDirs        []string
 	OutPath       string
 	Terminal      Terminal
+	deps          deps
 }
 
 // RestoreReport carries counts, indices and paths only. No field may ever hold
@@ -41,7 +42,8 @@ type RestoreReport struct {
 }
 
 func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*RestoreReport, error) {
-	captureTestContext(ctx)
+	sess := newSession(ctx, opts.Terminal, opts.deps, status)
+	defer sess.Close()
 	// Advisory: O_EXCL on .partial is the real gate. Fail here so a leftover
 	// is reported in a second, not after reconstructing GiB of shards.
 	partial := opts.OutPath + ".partial"
@@ -51,7 +53,7 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	set, err := openShardSet(ctx, opts.IdentityPaths, opts.InDirs, false, status, opts.Terminal)
+	set, err := openShardSet(sess, opts.IdentityPaths, opts.InDirs, false)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +61,6 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		if ObserveRunInteractions != nil {
 			ObserveRunInteractions(set.keys.Interactions())
 		}
-		set.keys.Zero()
 	}()
 
 	if err := set.usableErr(); err != nil {
@@ -109,7 +110,7 @@ var (
 	_ manifest.MACKeySource = (*key.ManifestKeys)(nil)
 )
 
-func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, scanAll bool, status io.Writer, term Terminal) (*shardSet, error) {
+func openShardSet(sess *session, identityPaths []string, inDirs []string, scanAll bool) (*shardSet, error) {
 	if len(inDirs) == 0 {
 		return nil, errors.New("at least one -in directory is required")
 	}
@@ -141,19 +142,17 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 
 	groups, order := groupCandidates(cands)
 
-	src := terminalSource(term)
-	keys, err := key.LoadSet(identityPaths, src, key.WithContext(ctx))
+	keys, err := sess.loadKeys(identityPaths)
 	if err != nil {
 		return nil, err
 	}
 	// Plugin-only: refuse with no TTY before any age-plugin-* process.
 	// A native-with-scalar set never opens the terminal here; natives are decrypted first.
-	if err := refuseInteractiveWithoutTerminal(keys); err != nil {
-		keys.Zero()
+	if err := refuseInteractiveWithoutTerminal(keys, sess); err != nil {
 		return nil, err
 	}
 	if nativeScalar(keys) == nil {
-		noteFirstPlugin(keys, status)
+		noteFirstPlugin(keys, sess.status)
 	}
 	ok := false
 	defer func() {
@@ -164,12 +163,11 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 			if ObserveRunInteractions != nil {
 				ObserveRunInteractions(keys.Interactions())
 			}
-			keys.Zero()
 		}
 	}()
 	// Every term of the budget is known (d from groups, p from the set, q from
 	// the pin record) and no plugin identity has been tried yet.
-	announceInteractionBudget(status, len(dirs), groups, keys)
+	announceInteractionBudget(sess.status, len(dirs), groups, keys)
 	// Eager v1 scalar derivation keeps plugin-only v1 restores failing
 	// closed with ErrNoScalar and zero invocations. A pin-bearing set
 	// without a scalar is v2: Open resolves the pin, and KeyFor(1, 0)
@@ -191,14 +189,14 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if testWrapManifestOpener != nil {
 		op = testWrapManifestOpener(op)
 	}
-	m, err := chooseManifest(groups, order, mk, op, identitySource(keys, identityPaths), multi, status)
+	m, err := chooseManifest(groups, order, mk, op, identitySource(keys, identityPaths), multi, sess.status)
 	if err != nil {
 		return nil, err
 	}
 
 	// Positional: compacting survivors makes ReconstructData and Join both
 	// return nil while emitting a different SHA-256.
-	shards, failed, missing, err := selectShards(ctx, m, dirs, scanAll, multi, status)
+	shards, failed, missing, err := selectShards(sess.ctx, m, dirs, scanAll, multi, sess.status)
 	if err != nil {
 		return nil, err
 	}

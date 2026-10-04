@@ -25,7 +25,7 @@ func (a *app) verifyCommand() *cli.Command {
 			rep, err := pipeline.Verify(ctx, pipeline.VerifyOptions{
 				IdentityPaths: c.StringSlice("identity"),
 				InDirs:        c.StringSlice("in"),
-				Terminal:      testTerminal,
+				Terminal:      a.term,
 			}, a.stderr)
 			if rep != nil {
 				// First, even when err != nil.

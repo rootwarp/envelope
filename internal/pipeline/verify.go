@@ -12,6 +12,7 @@ type VerifyOptions struct {
 	IdentityPaths []string
 	InDirs        []string
 	Terminal      Terminal
+	deps          deps
 }
 
 type ShardState int
@@ -79,7 +80,9 @@ type VerifyReport struct {
 var ErrDamaged = errors.New("shard set is damaged: at least one shard failed its digest")
 
 func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyReport, error) {
-	set, err := openShardSet(ctx, opts.IdentityPaths, opts.InDirs, true, status, opts.Terminal)
+	sess := newSession(ctx, opts.Terminal, opts.deps, status)
+	defer sess.Close()
+	set, err := openShardSet(sess, opts.IdentityPaths, opts.InDirs, true)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +90,6 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 		if ObserveRunInteractions != nil {
 			ObserveRunInteractions(set.keys.Interactions())
 		}
-		set.keys.Zero()
 	}()
 
 	rep := &VerifyReport{

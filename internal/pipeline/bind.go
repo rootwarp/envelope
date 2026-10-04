@@ -24,6 +24,7 @@ type BindOptions struct {
 	BundlePath    string // the two modify modes
 	OutPath       string // create
 	Terminal      Terminal
+	deps          deps
 }
 
 type BindReport struct {
@@ -67,8 +68,10 @@ func bindCreate(ctx context.Context, opts BindOptions) (*BindReport, error) {
 	}
 	// Wrap talks to the plugin client through ClientUI; a nil UI panics
 	// even when encryption to a plugin recipient is card-free.
-	ui := key.NewClientUI(terminalSource(opts.Terminal))
-	defer ui.Close() // a plugin may message during Wrap; that handle is ours
+	sess := newSession(ctx, opts.Terminal, opts.deps, nil)
+	defer sess.Close()
+	ui := key.NewClientUI(sess.source())
+	defer ui.Close() // Wrap may prompt on the borrowed handle; this only drops the UI cache. The session closes the fd.
 	rs, err := key.ParseRecipients(opts.Recipients, ui)
 	if err != nil {
 		return nil, err
@@ -114,13 +117,13 @@ func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error
 		return nil, err
 	}
 
-	src := terminalSource(opts.Terminal)
-	set, err := key.LoadFiles([]*key.IdentityFile{f}, src, key.WithContext(ctx))
+	sess := newSession(ctx, opts.Terminal, opts.deps, nil)
+	defer sess.Close()
+	set, err := sess.loadFiles([]*key.IdentityFile{f})
 	if err != nil {
 		return nil, err
 	}
-	defer set.Zero()
-	if err := refuseInteractiveWithoutTerminal(set); err != nil {
+	if err := refuseInteractiveWithoutTerminal(set, sess); err != nil {
 		return nil, err
 	}
 	if err := b.AddRecipients(set, extra); err != nil {

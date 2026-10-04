@@ -17,7 +17,7 @@ func (a *app) recipientCommand() *cli.Command {
 		description: descriptionRecipient,
 		flags:       []cli.Flag{pathFlag("identity", "identity `FILE` from keygen")},
 		run: func(_ context.Context, c *cli.Command) error {
-			rs, err := pipeline.Recipient(pipeline.RecipientOptions{IdentityPath: c.String("identity"), Terminal: testTerminal})
+			rs, err := pipeline.Recipient(pipeline.RecipientOptions{IdentityPath: c.String("identity"), Terminal: a.term})
 			if err != nil {
 				return err
 			}

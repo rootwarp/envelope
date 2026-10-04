@@ -23,6 +23,7 @@ type SplitOptions struct {
 	OutDir       string
 	K, N         int
 	Terminal     Terminal
+	deps         deps
 }
 
 // SplitReport carries counts, indices and paths only. No field may ever hold
@@ -53,7 +54,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	captureTestContext(ctx)
+	sess := newSession(ctx, opts.Terminal, opts.deps, status)
+	defer sess.Close()
 
 	// One read for this path. v1's MAC identity is the scalar parsed into the
 	// set; a second Load would hold another copy of it.
@@ -62,12 +64,10 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err != nil {
 		return nil, err
 	}
-	src := terminalSource(opts.Terminal)
-	set, err := key.LoadFiles([]*key.IdentityFile{f}, src, key.WithContext(ctx))
+	set, err := sess.loadFiles([]*key.IdentityFile{f})
 	if err != nil {
 		return nil, err
 	}
-	defer set.Zero()
 	if ObserveSplitInteractions != nil {
 		defer func() { ObserveSplitInteractions(set.Interactions()) }()
 	}
@@ -109,8 +109,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 			id.Zero()
 			return nil, key.ErrNoPin
 		}
-		ui := key.NewClientUI(src)
-		defer ui.Close() // a plugin may message during Wrap; that handle is ours
+		ui := key.NewClientUI(sess.source())
+		defer ui.Close() // Wrap may prompt on the borrowed handle; this only drops the UI cache. The session closes the fd.
 		rs, err = key.ParseRecipients(recStrs, ui)
 		if err != nil {
 			return nil, err
@@ -173,7 +173,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		// payload is encrypted to the recorded recipients and before the
 		// first shard is written. Abort removes only paths this call created,
 		// and nothing has been created yet.
-		if err := refuseInteractiveWithoutTerminal(set); err != nil {
+		if err := refuseInteractiveWithoutTerminal(set, sess); err != nil {
 			_ = txn.Abort()
 			return nil, err
 		}

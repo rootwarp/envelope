@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -10,6 +11,7 @@ import (
 type RecipientOptions struct {
 	IdentityPath string
 	Terminal     Terminal
+	deps         deps
 }
 
 // ErrNoLocalRecipient is a plugin identity with no bundle: the stub carries
@@ -25,6 +27,8 @@ func errNoLocalRecipient() error {
 // The stub carries no public key, so a bundle's recorded set is the only
 // local source; a bare plugin identity must not be asked for a recipient.
 func Recipient(opts RecipientOptions) ([]string, error) {
+	sess := newSession(context.Background(), opts.Terminal, opts.deps, nil)
+	defer sess.Close()
 	f, err := key.ReadIdentityFile(opts.IdentityPath)
 	defer f.Zero()
 	if err != nil {
@@ -54,11 +58,10 @@ func Recipient(opts RecipientOptions) ([]string, error) {
 	// Single rejects AGE-PLUGIN- lines as invalid; LoadFiles parses them
 	// without starting a plugin process. A LoadFiles failure still returns
 	// Single's error, which is the error Load would have reported.
-	set, lerr := key.LoadFiles([]*key.IdentityFile{f}, terminalSource(opts.Terminal))
+	set, lerr := sess.loadFiles([]*key.IdentityFile{f})
 	if lerr != nil {
 		return nil, err
 	}
-	defer set.Zero()
 	for _, ident := range set.Identities() {
 		if ident.Kind() == key.KindPlugin {
 			return nil, errNoLocalRecipient()

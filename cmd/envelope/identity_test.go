@@ -308,11 +308,9 @@ func TestResolvedPluginPathOnStderr(t *testing.T) {
 	id, shards, out := mustSplitFixture(t)
 	_ = id
 	pluginPath := writePluginIdentity(t, name, fakeplugin.ModeOK)
-	testTerminal = stubTerm{}
-	t.Cleanup(func() { testTerminal = nil })
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"restore", "-identity", pluginPath, "-in", shards, "-out", out}, &stdout, &stderr)
+	code := runWith([]string{"restore", "-identity", pluginPath, "-in", shards, "-out", out}, &stdout, &stderr, stubTerm{})
 	if code == exitOK {
 		t.Fatal("plugin-only v1 restore succeeded")
 	}

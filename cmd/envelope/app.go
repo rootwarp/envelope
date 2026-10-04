@@ -12,12 +12,14 @@ import (
 	"github.com/rootwarp/envelope/internal/pipeline"
 )
 
-// testTerminal is injected by tests. Production leaves it nil so pipeline
-// opens /dev/tty on demand. cmd/envelope must not import internal/key (D7).
-var testTerminal pipeline.Terminal
-
-// app is one run's writers. Closures capture it so nothing lives at package scope.
-type app struct{ stdout, stderr io.Writer }
+// app is one run's writers and, when a test supplies one, its terminal.
+// Closures capture it so nothing lives at package scope. Production leaves
+// term nil so pipeline opens /dev/tty on demand. cmd/envelope must not
+// import internal/key.
+type app struct {
+	stdout, stderr io.Writer
+	term           pipeline.Terminal
+}
 
 type cmdSpec struct {
 	name, summary, contract, description string
@@ -26,7 +28,11 @@ type cmdSpec struct {
 }
 
 func newApp(stdout, stderr io.Writer) *cli.Command {
-	a := &app{stdout: stdout, stderr: stderr}
+	return newAppWith(stdout, stderr, nil)
+}
+
+func newAppWith(stdout, stderr io.Writer, term pipeline.Terminal) *cli.Command {
+	a := &app{stdout: stdout, stderr: stderr, term: term}
 	return &cli.Command{
 		Name:      "envelope",
 		Usage:     summaryRoot,
@@ -55,7 +61,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 				description: descriptionKeygen,
 				flags:       []cli.Flag{pathFlag("out", "identity `FILE`")},
 				run: func(_ context.Context, c *cli.Command) error {
-					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out"), Terminal: testTerminal}, a.stderr)
+					return pipeline.Keygen(pipeline.KeygenOptions{IdentityPath: c.String("out"), Terminal: a.term}, a.stderr)
 				},
 			}),
 			a.bindCommand(),
@@ -84,7 +90,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 						OutDir:       c.String("out"),
 						K:            k,
 						N:            n,
-						Terminal:     testTerminal,
+						Terminal:     a.term,
 					}, a.stderr)
 					if err != nil && errors.Is(err, pipeline.ErrBadRecipient) {
 						return usageFail(a.stderr, usageSplit, fmt.Errorf("-recipient: %w", err))
@@ -107,7 +113,7 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 						IdentityPaths: c.StringSlice("identity"),
 						InDirs:        c.StringSlice("in"),
 						OutPath:       c.String("out"),
-						Terminal:      testTerminal,
+						Terminal:      a.term,
 					}, a.stderr)
 					return err
 				},

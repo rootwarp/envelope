@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,30 +17,6 @@ type Terminal = key.Terminal
 // this identity would need to prompt. The /dev/tty open failing is the detection.
 // Never block, never retry, never fall back to stdin — which may be the payload.
 var ErrNoPinTerminal = errors.New("this identity needs a PIN and there is no terminal to ask on")
-
-// testOpenTerminal, when set, replaces key.OpenTerminal for the production
-// source. Tests force a missing or present terminal without a real /dev/tty.
-var testOpenTerminal func() (Terminal, error)
-
-// testCaptureCtx, when set, receives the command context. The
-// envelope_signaltest build parks a plugin prompt on it.
-var testCaptureCtx func(context.Context)
-
-func captureTestContext(ctx context.Context) {
-	if testCaptureCtx != nil {
-		testCaptureCtx(ctx)
-	}
-}
-
-func terminalSource(t Terminal) key.TerminalSource {
-	if t != nil {
-		return key.Borrow(t)
-	}
-	if testOpenTerminal != nil {
-		return testOpenTerminal
-	}
-	return key.OpenTerminal
-}
 
 func nativeScalar(s *key.Set) *key.Identity {
 	if s == nil {
@@ -83,15 +58,15 @@ func identitySource(s *key.Set, paths []string) string {
 // refuseInteractiveWithoutTerminal fails closed before a plugin process starts.
 // A native identity with a scalar never opens the terminal, so a
 // mixed set still restores a v1 shard set with zero plugin interactions.
-// The preflight resolves the run's handle and closes nothing.
-func refuseInteractiveWithoutTerminal(s *key.Set) error {
+// The preflight resolves the run's one handle and closes nothing.
+func refuseInteractiveWithoutTerminal(s *key.Set, sess *session) error {
 	if s == nil || !s.Interactive() {
 		return nil
 	}
 	if nativeScalar(s) != nil {
 		return nil
 	}
-	if err := s.ResolveTerminal(); err != nil {
+	if err := sess.requireTerminal(); err != nil {
 		return ErrNoPinTerminal
 	}
 	return nil

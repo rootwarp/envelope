@@ -111,9 +111,10 @@ func (u *ClientUI) terminal() (Terminal, error) {
 	return t, nil
 }
 
-// Close closes the terminal this UI opened and forgets it. A nil UI and a
-// second call are no-ops. Forgetting the handle is what lets a later prompt
-// open a fresh one instead of writing to the one just closed.
+// Close closes the handle this UI's source returned and forgets it. A nil UI
+// and a second call are no-ops. Borrow's handle ignores Close; the caller
+// that kept the real terminal closes that one. Forgetting the handle is what
+// lets a later prompt ask the source again instead of writing to a closed one.
 func (u *ClientUI) Close() error {
 	if u == nil {
 		return nil
