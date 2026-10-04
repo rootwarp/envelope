@@ -132,7 +132,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 		return nil, cands[0].err
 	}
 
-	groups := groupCandidates(cands)
+	groups, order := groupCandidates(cands)
 
 	src := terminalSource(term)
 	keys, err := key.LoadSet(identityPaths, src)
@@ -184,7 +184,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	if testWrapManifestOpener != nil {
 		op = testWrapManifestOpener(op)
 	}
-	m, err := chooseManifest(groups, mk, op, identitySource(keys, identityPaths), multi, status)
+	m, err := chooseManifest(groups, order, mk, op, identitySource(keys, identityPaths), multi, status)
 	if err != nil {
 		return nil, err
 	}

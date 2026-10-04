@@ -30,7 +30,7 @@ func TestGroupCandidates(t *testing.T) {
 		{path: "p3", blob: other},
 		{path: "p4", blob: same},
 	}
-	groups := groupCandidates(cands)
+	groups, _ := groupCandidates(cands)
 	if len(groups) != 4 {
 		t.Fatalf("len(groups) = %d, want 4", len(groups))
 	}
@@ -322,7 +322,8 @@ func TestV1RepresentativeConsultsNoPin(t *testing.T) {
 	var events []string
 	src := &tracingMAC{inner: keys, events: &events}
 	op := &tracingOpener{inner: keys, events: &events}
-	_, err = chooseManifest(groupCandidates(cands), src, op, bundle, true, io.Discard)
+	groups, order := groupCandidates(cands)
+	_, err = chooseManifest(groups, order, src, op, bundle, true, io.Discard)
 	if !errors.Is(err, ErrConflictingManifests) {
 		t.Fatalf("errors.Is(., ErrConflictingManifests) = false, err=%v", err)
 	}
@@ -383,17 +384,20 @@ func gatherFrom(t *testing.T, inDirs []string) []manifestCandidate {
 // must match it byte-for-byte on firstErr and flushed notes.
 func chooseManifestEach(cands []manifestCandidate, src manifest.MACKeySource, op manifest.Opener, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
 	groups := make([]manifestGroup, 0, len(cands))
-	for _, c := range cands {
+	order := make([]memberRef, len(cands))
+	for i, c := range cands {
 		groups = append(groups, manifestGroup{rep: c, paths: []string{c.path}})
+		order[i] = memberRef{group: i, k: 0}
 	}
-	return chooseManifest(groups, src, op, identityPath, multi, status)
+	return chooseManifest(groups, order, src, op, identityPath, multi, status)
 }
 
 func assertChooseReplay(t *testing.T, cands []manifestCandidate, keys *key.Set, idPath string, multi bool) {
 	t.Helper()
 	var wantStatus, gotStatus bytes.Buffer
 	_, wantErr := chooseManifestEach(cands, keys, keys, idPath, multi, &wantStatus)
-	_, gotErr := chooseManifest(groupCandidates(cands), keys, keys, idPath, multi, &gotStatus)
+	groups, order := groupCandidates(cands)
+	_, gotErr := chooseManifest(groups, order, keys, keys, idPath, multi, &gotStatus)
 	if (wantErr == nil) != (gotErr == nil) {
 		t.Fatalf("err grouped=%v ungrouped=%v", gotErr, wantErr)
 	}

@@ -97,6 +97,14 @@ type manifestGroup struct {
 	paths []string          // every path whose blob was byte-identical, in -in order
 }
 
+// memberRef is one candidate's position in the grouped lists. Positions exist
+// so a missing one cannot be skipped: groupCandidates returns them beside the
+// groups, rather than as a field a caller could leave empty.
+type memberRef struct {
+	group int
+	k     int
+}
+
 // groupCandidates groups the candidates whose read succeeded by SHA-256 of the
 // already-read blob (not a re-read: that would be a TOCTOU the current code
 // does not have). Byte-identical blobs decrypt to identical bodies and
@@ -105,9 +113,10 @@ type manifestGroup struct {
 // Three rules make the optimisation unobservable, and each is a bug if missed:
 //
 //  1. Dedup collapses decryptions, never diagnostics. The representative's
-//     outcome is replayed for every path in its group, in -in order, so the
-//     buffered stderr notes and firstErr stay byte-identical to opening every
-//     copy. That is what keeps a v1 multi-directory run byte-identical (I-11).
+//     outcome is replayed for every path in its group at each path's own
+//     position, not group by group, because members of different groups
+//     interleave. Buffered stderr notes and firstErr stay byte-identical to
+//     opening every copy, which keeps a v1 multi-directory run byte-identical.
 //
 //  2. Only c.err == nil candidates may be grouped. An error candidate carries
 //     a nil or partial blob, and chooseManifest buffers one stderr note per
@@ -119,30 +128,39 @@ type manifestGroup struct {
 //     resolving a key up front is forbidden — it is exactly what would break
 //     FR-YK-03's lazy KeyFor promise. A v1 representative in a mixed run is
 //     opened, and opening it consults no pin and costs no card.
-func groupCandidates(cands []manifestCandidate) []manifestGroup {
+//
+// order[i] is candidate i. That slice is the only record of positions.
+func groupCandidates(cands []manifestCandidate) ([]manifestGroup, []memberRef) {
 	groups := make([]manifestGroup, 0, len(cands))
+	order := make([]memberRef, 0, len(cands))
 	seen := make(map[[sha256.Size]byte]int, len(cands))
 	for _, c := range cands {
 		if c.err != nil {
+			order = append(order, memberRef{group: len(groups), k: 0})
 			groups = append(groups, manifestGroup{rep: c, paths: []string{c.path}})
 			continue
 		}
 		sum := sha256.Sum256(c.blob)
 		if i, ok := seen[sum]; ok {
+			order = append(order, memberRef{group: i, k: len(groups[i].paths)})
 			groups[i].paths = append(groups[i].paths, c.path)
 			continue
 		}
 		seen[sum] = len(groups)
+		order = append(order, memberRef{group: len(groups), k: 0})
 		groups = append(groups, manifestGroup{rep: c, paths: []string{c.path}})
 	}
-	return groups
+	if len(order) != len(cands) {
+		panic(fmt.Sprintf("groupCandidates: len(order)=%d len(cands)=%d", len(order), len(cands)))
+	}
+	return groups, order
 }
 
 // chooseManifest applies FR-MD-03. Two authenticated manifests agree iff their
 // MACs are equal: both were verified against the same key, and macInput covers
 // exactly the fields that influence restore, so MAC equality is decoded-field
 // equality without comparing the randomized .age blobs.
-func chooseManifest(groups []manifestGroup, src manifest.MACKeySource, op manifest.Opener, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
+func chooseManifest(groups []manifestGroup, order []memberRef, src manifest.MACKeySource, op manifest.Opener, identityPath string, multi bool, status io.Writer) (*manifest.Manifest, error) {
 	var chosen *manifest.Manifest
 	var chosenPath string
 	var firstErr error
@@ -164,36 +182,57 @@ func chooseManifest(groups []manifestGroup, src manifest.MACKeySource, op manife
 		notes = append(notes, shown)
 	}
 
+	// len(order) == len(cands). A short order would skip a member; that is a
+	// programming error, not a candidate to drop.
+	nCands := 0
 	for _, g := range groups {
+		nCands += len(g.paths)
+	}
+	if len(order) != nCands {
+		panic(fmt.Sprintf("chooseManifest: len(order)=%d len(cands)=%d", len(order), nCands))
+	}
+
+	// One lazy pass in -in order. A group is opened at its first member, its
+	// representative, and the outcome (open error and the choose-or-conflict
+	// decision) is cached so later members only replay noteFail at their own
+	// path. Opening every group first would add opens after a conflict
+	// return. An optional position field skipped when the group index is
+	// negative would drop a member that was never recorded.
+	type groupOutcome struct {
+		opened bool
+		err    error
+	}
+	outs := make([]groupOutcome, len(groups))
+	for _, mb := range order {
+		g := groups[mb.group]
 		if g.rep.err != nil {
 			// readManifestBlob already formatted a path-bearing error.
-			// Replay per path so an error group still names every member;
 			// groupCandidates keeps error candidates one group each, so this
 			// is one note per failed read, as before.
-			for range g.paths {
-				if firstErr == nil {
-					firstErr = g.rep.err
+			if firstErr == nil {
+				firstErr = g.rep.err
+			}
+			notes = append(notes, g.rep.err)
+		} else {
+			o := &outs[mb.group]
+			if !o.opened {
+				o.opened = true
+				m, err := manifest.Open(g.rep.blob, src, op)
+				o.err = err
+				if err == nil {
+					if chosen == nil {
+						chosen, chosenPath = m, g.rep.path
+					} else if !bytes.Equal(chosen.MAC, m.MAC) {
+						if chosen.Version != m.Version {
+							return nil, fmt.Errorf("%w: %s and %s: these directories hold manifests from different splits", ErrConflictingManifests, chosenPath, g.rep.path)
+						}
+						return nil, fmt.Errorf("%w: %s and %s describe different shard sets", ErrConflictingManifests, chosenPath, g.rep.path)
+					}
 				}
-				notes = append(notes, g.rep.err)
 			}
-			continue
-		}
-		m, err := manifest.Open(g.rep.blob, src, op)
-		if err != nil {
-			for _, p := range g.paths {
-				noteFail(manifestCandidate{path: p, blob: g.rep.blob}, err)
+			if o.err != nil {
+				noteFail(manifestCandidate{path: g.paths[mb.k], blob: g.rep.blob}, o.err)
 			}
-			continue
-		}
-		if chosen == nil {
-			chosen, chosenPath = m, g.rep.path
-			continue
-		}
-		if !bytes.Equal(chosen.MAC, m.MAC) {
-			if chosen.Version != m.Version {
-				return nil, fmt.Errorf("%w: %s and %s: these directories hold manifests from different splits", ErrConflictingManifests, chosenPath, g.rep.path)
-			}
-			return nil, fmt.Errorf("%w: %s and %s describe different shard sets", ErrConflictingManifests, chosenPath, g.rep.path)
 		}
 	}
 	if chosen == nil {
