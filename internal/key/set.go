@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,9 @@ type Set struct {
 	ui           *ClientUI
 	term         TerminalSource
 	ctx          context.Context
+	decrypt      func(io.Reader, ...age.Identity) (io.Reader, error)
+	observeSeed  func([]byte)
+	failWrite    func() error
 	nPaths       int
 	bundle       bool
 	interactions atomic.Int32
@@ -49,10 +53,6 @@ type attemptState struct {
 	err       error
 }
 
-// testObserveSeed, when set, receives the unwrapped seed before the two HKDFs.
-// Tests alias that buffer to prove it is cleared before KeyFor returns.
-var testObserveSeed func([]byte)
-
 type SetOption func(*Set)
 
 // WithContext keeps ctx on the Set for the whole run. Once ctx is cancelled,
@@ -62,6 +62,38 @@ func WithContext(ctx context.Context) SetOption {
 	return func(s *Set) {
 		if ctx != nil {
 			s.ctx = ctx
+		}
+	}
+}
+
+// WithDecrypt replaces the production age.Decrypt call used for plugin
+// identities. The default, when this option is absent, is that production
+// call: one identity, then age.Decrypt.
+func WithDecrypt(fn func(io.Reader, ...age.Identity) (io.Reader, error)) SetOption {
+	return func(s *Set) {
+		if fn != nil {
+			s.decrypt = fn
+		}
+	}
+}
+
+// WithObserveSeed replaces observing the unwrapped seed through package
+// state. fn receives the seed before the two HKDFs. The default, when this
+// option is absent, is production: the seed is not observed.
+func WithObserveSeed(fn func([]byte)) SetOption {
+	return func(s *Set) {
+		if fn != nil {
+			s.observeSeed = fn
+		}
+	}
+}
+
+// WithFailWrite replaces the Sync that follows a new identity file's Write.
+// The default, when this option is absent, is production: the file is synced.
+func WithFailWrite(fn func() error) SetOption {
+	return func(s *Set) {
+		if fn != nil {
+			s.failWrite = fn
 		}
 	}
 }
@@ -454,8 +486,8 @@ func (s *Set) unwrapPinMACKey() ([]byte, error) {
 		return nil, err
 	}
 	defer clear(seed)
-	if testObserveSeed != nil {
-		testObserveSeed(seed)
+	if s.observeSeed != nil {
+		s.observeSeed(seed)
 	}
 	if len(seed) != seedLen {
 		return nil, ErrPinCorrupt

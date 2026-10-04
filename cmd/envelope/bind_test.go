@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/rootwarp/envelope/internal/key"
-	"github.com/rootwarp/envelope/internal/pipeline"
 	"github.com/rootwarp/envelope/test/fakeplugin"
 )
 
@@ -313,11 +312,13 @@ func TestBindReplaceInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := errors.New("injected rename failure")
-	key.ReplaceRename = func(string, string) error { return injected }
-	t.Cleanup(func() { key.ReplaceRename = nil })
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"bind", "-bundle", bundle, "-replace-identity", other}, &stdout, &stderr)
+	code := runApp([]string{"bind", "-bundle", bundle, "-replace-identity", other}, &app{
+		stdout:     &stdout,
+		stderr:     &stderr,
+		bindRename: func(string, string) error { return injected },
+	})
 	if code != exitFailure {
 		t.Fatalf("exit=%d want %d\nstderr=%q", code, exitFailure, stderr.String())
 	}
@@ -358,11 +359,11 @@ func TestBindInteractionsCLI(t *testing.T) {
 	pluginRec := fakeplugin.Recipient(name, fakeplugin.ModeOK)
 	pluginBundle := filepath.Join(dir, "plugin-bundle.txt")
 	mustRunTerm(t, term, "bind", "-identity", stub, "-recipient", pluginRec, "-out", pluginBundle)
-	got := observePipelineBindSet(t)
+	got, observe := observePipelineBindSet(t)
 	other := filepath.Join(dir, "other.txt")
 	mustRun(t, "keygen", "-out", other)
 	recB := mustRecipient(t, other)
-	mustRunTerm(t, term, "bind", "-bundle", pluginBundle, "-add-recipient", recB)
+	mustRunTermObserve(t, term, observe, "bind", "-bundle", pluginBundle, "-add-recipient", recB)
 	if *got != 1 {
 		t.Fatalf("add-recipient Interactions = %d, want 1", *got)
 	}
@@ -412,13 +413,11 @@ func assertNoSecretBytes(t *testing.T, blobs ...[]byte) {
 	}
 }
 
-func observePipelineBindSet(t *testing.T) *int {
+func observePipelineBindSet(t *testing.T) (*int, func(int)) {
 	t.Helper()
 	n := new(int)
 	*n = -1
-	pipeline.ObserveBindInteractions = func(got int) { *n = got }
-	t.Cleanup(func() { pipeline.ObserveBindInteractions = nil })
-	return n
+	return n, func(got int) { *n = got }
 }
 
 func mustBindCreate(t *testing.T, identity, recipient string) string {

@@ -441,8 +441,7 @@ func TestKeyForClearsSeed(t *testing.T) {
 	set := mustLoadSet(t, nil, writeBundleFile(t, b))
 
 	var alias []byte
-	testObserveSeed = func(seed []byte) { alias = seed }
-	t.Cleanup(func() { testObserveSeed = nil })
+	WithObserveSeed(func(seed []byte) { alias = seed })(set)
 
 	got, err := set.KeyFor(versionPin, macSourcePin)
 	if err != nil {
@@ -478,8 +477,7 @@ func TestKeyForClearsSeedOnCorrupt(t *testing.T) {
 	set := mustLoadSet(t, nil, writeBundleFile(t, b))
 
 	var alias []byte
-	testObserveSeed = func(seed []byte) { alias = seed }
-	t.Cleanup(func() { testObserveSeed = nil })
+	WithObserveSeed(func(seed []byte) { alias = seed })(set)
 
 	k, err := set.KeyFor(versionPin, macSourcePin)
 	if !errors.Is(err, ErrPinCorrupt) {

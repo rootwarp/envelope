@@ -38,7 +38,6 @@ var (
 	readPassword = readSecretFD
 	readLine     = readDevLine
 	watchSignal  = restoreOnSignal
-	signalNotify = signal.Notify
 	signalStop   = signal.Stop
 )
 
@@ -265,7 +264,8 @@ func readDevLine(f *os.File) (string, error) {
 // handler still owns cancellation.
 func restoreOnSignal(restore, abort func()) func() {
 	ch := make(chan os.Signal, 1)
-	signalNotify(ch, os.Interrupt, syscall.SIGTERM)
+	// No test swapped this notification, so it is not a hook.
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() {

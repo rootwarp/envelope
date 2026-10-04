@@ -17,6 +17,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/test/fakeplugin"
 )
@@ -341,13 +342,14 @@ func TestBindInteractions(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, recB := mustNativeID(t)
-		got := observeBindSet(t)
-		if _, err := Bind(context.Background(), BindOptions{
+		opts := BindOptions{
 			Mode:       BindAddRecipient,
 			Recipients: []string{recB},
 			BundlePath: out,
 			Terminal:   stubTerm{},
-		}, io.Discard); err != nil {
+		}
+		got := observeBindSet(t, &opts)
+		if _, err := Bind(context.Background(), opts, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if *got != 1 {
@@ -372,13 +374,14 @@ func TestBindInteractions(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, recB := mustNativeID(t)
-		got := observeBindSet(t)
-		if _, err := Bind(context.Background(), BindOptions{
+		opts := BindOptions{
 			Mode:       BindAddRecipient,
 			Recipients: []string{recB},
 			BundlePath: out,
 			Terminal:   stubTerm{},
-		}, io.Discard); err != nil {
+		}
+		got := observeBindSet(t, &opts)
+		if _, err := Bind(context.Background(), opts, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if *got > 2 || *got < 1 {
@@ -598,13 +601,12 @@ func TestBindReplaceInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	injected := errors.New("injected rename failure")
-	key.ReplaceRename = func(string, string) error { return injected }
-	t.Cleanup(func() { key.ReplaceRename = nil })
 
 	_, err = Bind(context.Background(), BindOptions{
 		Mode:          BindReplaceIdentity,
 		IdentityPaths: []string{pathB},
 		BundlePath:    bundle,
+		deps:          deps{txn: filetxn.Options{Rename: func(string, string) error { return injected }}},
 	}, io.Discard)
 	if !errors.Is(err, injected) {
 		t.Fatalf("errors.Is(., injected) = false: %v", err)
@@ -758,12 +760,11 @@ func mustLoadBundle(t *testing.T, path string, term Terminal) *key.Set {
 	return set
 }
 
-func observeBindSet(t *testing.T) *int {
+func observeBindSet(t *testing.T, opts *BindOptions) *int {
 	t.Helper()
 	n := new(int)
 	*n = -1
-	ObserveBindInteractions = func(got int) { *n = got }
-	t.Cleanup(func() { ObserveBindInteractions = nil })
+	opts.deps.observeBind = func(got int) { *n = got }
 	return n
 }
 

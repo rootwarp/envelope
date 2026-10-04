@@ -47,14 +47,14 @@ func TestSplitHonorsCanceledContext(t *testing.T) {
 func TestSplitCancelDuringShardWriteRemovesOutput(t *testing.T) {
 	out := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
-	testBeforeShardWrite = func(i int) {
+	opts := validOpts(t, out)
+	opts.deps.beforeShardWrite = func(i int) {
 		if i == 1 {
 			cancel()
 		}
 	}
-	t.Cleanup(func() { testBeforeShardWrite = nil })
 
-	_, err := Split(ctx, validOpts(t, out), io.Discard)
+	_, err := Split(ctx, opts, io.Discard)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
 	}
@@ -76,14 +76,13 @@ func TestSplitCancelBeforeManifestRenameRemovesOnlyItsOwnFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	const foreign = "keep.txt"
-	testFailManifestWrite = func() error {
+	opts.deps.failManifestWrite = func() error {
 		if err := os.WriteFile(filepath.Join(out, foreign), []byte("keep"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		cancel()
 		return nil
 	}
-	t.Cleanup(func() { testFailManifestWrite = nil })
 
 	_, err := Split(ctx, opts, io.Discard)
 	if !errors.Is(err, context.Canceled) {
@@ -415,13 +414,11 @@ func TestSplitCiphertextShorterThanK(t *testing.T) {
 }
 
 func TestSplitManifestWrittenLast(t *testing.T) {
-	testFailManifestWrite = func() error {
-		return errors.New("injected manifest write failure")
-	}
-	t.Cleanup(func() { testFailManifestWrite = nil })
-
 	out := t.TempDir()
 	opts := validOpts(t, out)
+	opts.deps.failManifestWrite = func() error {
+		return errors.New("injected manifest write failure")
+	}
 	_, err := Split(context.Background(), opts, io.Discard)
 	if err == nil {
 		t.Fatal("err = nil, want injected failure")

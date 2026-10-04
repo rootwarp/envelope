@@ -27,6 +27,26 @@ type BindOptions struct {
 	deps          deps
 }
 
+// SetTestRename replaces os.Rename when this bind publishes the bundle.
+// A nil function is production. Tests outside this package use it;
+// in-package tests set deps.
+func (o *BindOptions) SetTestRename(fn func(oldpath, newpath string) error) {
+	if fn == nil {
+		return
+	}
+	o.deps.txn.Rename = fn
+}
+
+// SetTestObserveBind receives the pin-unwrap count from add-recipient.
+// A nil function is production, which records nothing. Tests outside this
+// package use it; in-package tests set deps.
+func (o *BindOptions) SetTestObserveBind(fn func(int)) {
+	if fn == nil {
+		return
+	}
+	o.deps.observeBind = fn
+}
+
 type BindReport struct {
 	Path       string
 	Recipients []string
@@ -39,10 +59,6 @@ type BindReport struct {
 var ErrBadRecipient = key.ErrBadRecipient
 
 var errBindMode = errors.New("bind mode is not valid")
-
-// ObserveBindInteractions receives the pin-unwrap count from add-recipient,
-// before Zero. Tests assert interaction counts with it.
-var ObserveBindInteractions func(int)
 
 func Bind(ctx context.Context, opts BindOptions, status io.Writer) (*BindReport, error) {
 	if err := ctx.Err(); err != nil {
@@ -129,10 +145,10 @@ func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error
 	if err := b.AddRecipients(set, extra); err != nil {
 		return nil, err
 	}
-	if ObserveBindInteractions != nil {
-		ObserveBindInteractions(set.Interactions())
+	if sess.deps.observeBind != nil {
+		sess.deps.observeBind(set.Interactions())
 	}
-	if err := key.Replace(ctx, opts.BundlePath, b); err != nil {
+	if err := key.Replace(ctx, opts.BundlePath, b, sess.deps.txn); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil
@@ -150,7 +166,7 @@ func bindReplaceIdentity(ctx context.Context, opts BindOptions) (*BindReport, er
 	if err := b.ReplaceIdentities(lines); err != nil {
 		return nil, err
 	}
-	if err := key.Replace(ctx, opts.BundlePath, b); err != nil {
+	if err := key.Replace(ctx, opts.BundlePath, b, opts.deps.txn); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil

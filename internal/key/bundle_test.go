@@ -24,6 +24,7 @@ import (
 	"filippo.io/age/plugin"
 
 	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/test/fakeplugin"
 )
 
@@ -530,10 +531,10 @@ func TestReplaceCrashSafe(t *testing.T) {
 	}
 
 	injected := errors.New("injected rename failure")
-	ReplaceRename = func(string, string) error { return injected }
-	t.Cleanup(func() { ReplaceRename = nil })
 
-	err = Replace(context.Background(), path, b)
+	err = Replace(context.Background(), path, b, filetxn.Options{
+		Rename: func(string, string) error { return injected },
+	})
 	if !errors.Is(err, injected) {
 		t.Fatalf("errors.Is(., injected) = false: %v", err)
 	}
@@ -568,10 +569,8 @@ func TestReplaceWriteFailureLeavesNoTmp(t *testing.T) {
 	}
 
 	injected := errors.New("injected write failure")
-	testFailWriteNew = func() error { return injected }
-	t.Cleanup(func() { testFailWriteNew = nil })
 
-	err = Replace(context.Background(), path, b)
+	err = Replace(context.Background(), path, b, filetxn.Options{}, WithFailWrite(func() error { return injected }))
 	if !errors.Is(err, injected) {
 		t.Fatalf("errors.Is(., injected) = false: %v", err)
 	}
@@ -596,7 +595,7 @@ func TestReplacePreservesUnownedTmp(t *testing.T) {
 	if err := os.WriteFile(tmp, marker, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := Replace(context.Background(), path, b)
+	err := Replace(context.Background(), path, b, filetxn.Options{})
 	if !errors.Is(err, ErrIdentityExists) {
 		t.Fatalf("errors.Is(., ErrIdentityExists) = false: %v", err)
 	}

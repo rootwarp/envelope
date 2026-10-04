@@ -85,7 +85,7 @@ func Create(path string) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeNew0600(path, []byte(id.age.String()+"\n")); err != nil {
+	if err := writeNew0600(path, []byte(id.age.String()+"\n"), nil); err != nil {
 		return nil, err
 	}
 	return id, nil
@@ -93,7 +93,8 @@ func Create(path string) (*Identity, error) {
 
 // writeNew0600 is the keygen durability sequence: O_EXCL 0600, write, Sync,
 // Close, Chmod 0600, sync the directory. ErrIdentityExists on an existing path.
-func writeNew0600(path string, data []byte) error {
+// A nil failWrite is production: the file is synced.
+func writeNew0600(path string, data []byte, failWrite func() error) error {
 	txn := filetxn.Begin(filepath.Dir(path), filetxn.Options{})
 	f, err := txn.Create(path, 0o600)
 	if err != nil {
@@ -102,7 +103,7 @@ func writeNew0600(path string, data []byte) error {
 		}
 		return err
 	}
-	if err := writeNew0600Opened(txn, f, path, data); err != nil {
+	if err := writeNew0600Opened(txn, f, path, data, failWrite); err != nil {
 		// A leftover after O_EXCL makes retry "already exists" and a
 		// Replace tmp look like a second bundle.
 		_ = txn.Abort()
@@ -112,14 +113,14 @@ func writeNew0600(path string, data []byte) error {
 	return nil
 }
 
-func writeNew0600Opened(txn *filetxn.Txn, f *os.File, path string, data []byte) error {
+func writeNew0600Opened(txn *filetxn.Txn, f *os.File, path string, data []byte, failWrite func() error) error {
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return err
 	}
-	if testFailWriteNew != nil {
+	if failWrite != nil {
 		f.Close()
-		return testFailWriteNew()
+		return failWrite()
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
@@ -136,10 +137,6 @@ func writeNew0600Opened(txn *filetxn.Txn, f *os.File, path string, data []byte) 
 	}
 	return txn.SyncDir()
 }
-
-// testFailWriteNew, when set, runs after Write and replaces Sync. Tests
-// inject a write/sync failure after O_EXCL create.
-var testFailWriteNew func() error
 
 // Load parses path with age.ParseIdentities and rejects anything that is not
 // exactly one *age.X25519Identity, then recovers the scalar.

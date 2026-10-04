@@ -30,6 +30,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func runWith(args []string, stdout, stderr io.Writer, term pipeline.Terminal) int {
+	return runApp(args, &app{stdout: stdout, stderr: stderr, term: term})
+}
+
+func runApp(args []string, a *app) int {
 	// Restore the default handler as soon as the first signal arrives,
 	// not only after runErr returns, so a second Ctrl-C kills a stuck command.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -38,21 +42,21 @@ func runWith(args []string, stdout, stderr io.Writer, term pipeline.Terminal) in
 		<-ctx.Done()
 		stop()
 	}()
-	return exitCode(runErrWith(ctx, args, stdout, stderr, term), stderr)
+	return exitCode(runErrApp(ctx, args, a), a.stderr)
 }
 
 func runErr(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	return runErrWith(ctx, args, stdout, stderr, nil)
+	return runErrApp(ctx, args, &app{stdout: stdout, stderr: stderr})
 }
 
-func runErrWith(ctx context.Context, args []string, stdout, stderr io.Writer, term pipeline.Terminal) error {
+func runErrApp(ctx context.Context, args []string, a *app) error {
 	// -version is a flag, not a subcommand; branch before dispatch.
 	if isVersionArg(args) {
-		return printVersion(stdout)
+		return printVersion(a.stdout)
 	}
 	// Written through the injected writer, never the process streams.
 	if os.Getenv("AGEDEBUG") == "plugin" {
-		_, _ = io.WriteString(stderr, ageDebugPluginWarning+"\n")
+		_, _ = io.WriteString(a.stderr, ageDebugPluginWarning+"\n")
 	}
-	return newAppWith(stdout, stderr, term).Run(ctx, append([]string{"envelope"}, args...))
+	return appCommand(a).Run(ctx, append([]string{"envelope"}, args...))
 }

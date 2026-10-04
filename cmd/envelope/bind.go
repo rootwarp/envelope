@@ -68,6 +68,8 @@ func (a *app) bindOptions(c *cli.Command) (pipeline.BindOptions, error) {
 	}
 
 	opts := pipeline.BindOptions{Terminal: a.term}
+	opts.SetTestRename(a.bindRename)
+	opts.SetTestObserveBind(a.bindObserve)
 	switch {
 	case create:
 		opts.Mode = pipeline.BindCreate

@@ -159,11 +159,10 @@ func TestSetDecryptI13OneIdentityPerCall(t *testing.T) {
 
 	var lens []int
 	orig := decryptAge
-	t.Cleanup(func() { decryptAge = orig })
-	decryptAge = func(r io.Reader, ids ...age.Identity) (io.Reader, error) {
+	WithDecrypt(func(r io.Reader, ids ...age.Identity) (io.Reader, error) {
 		lens = append(lens, len(ids))
 		return orig(r, ids...)
-	}
+	})(set)
 
 	if _, err := set.DecryptBytes(ct); err != nil {
 		t.Fatal(err)
@@ -181,6 +180,8 @@ func TestSetDecryptI13OneIdentityPerCall(t *testing.T) {
 func TestI13ProductionDecryptNeverSpreadsIdentities(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
+	keyRoot := filepath.Join(root, "internal", "key")
+	var keyDecrypt int
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -203,6 +204,7 @@ func TestI13ProductionDecryptNeverSpreadsIdentities(t *testing.T) {
 		if !ok {
 			return nil
 		}
+		inKey := path == keyRoot || strings.HasPrefix(path, keyRoot+string(filepath.Separator))
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -215,6 +217,10 @@ func TestI13ProductionDecryptNeverSpreadsIdentities(t *testing.T) {
 			id, ok := sel.X.(*ast.Ident)
 			if !ok || id.Name != ageName {
 				return true
+			}
+			// Crypt has its own calls. This count is the key package only.
+			if inKey {
+				keyDecrypt++
 			}
 			if call.Ellipsis != 0 {
 				t.Errorf("%s: age.Decrypt spread", fset.Position(call.Pos()))
@@ -229,6 +235,9 @@ func TestI13ProductionDecryptNeverSpreadsIdentities(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if keyDecrypt != 1 {
+		t.Fatalf("internal/key age.Decrypt calls = %d, want 1", keyDecrypt)
 	}
 }
 

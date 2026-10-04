@@ -531,12 +531,9 @@ func TestSyncDirEIOFailsAfterCommit(t *testing.T) {
 
 func TestJoinUsesManifestLength(t *testing.T) {
 	var splitCT []byte
-	testAtCiphertext = func(ct []byte) {
+	restore, split := splitFixture(t, deps{atCiphertext: func(ct []byte) {
 		splitCT = bytes.Clone(ct)
-	}
-	t.Cleanup(func() { testAtCiphertext = nil })
-
-	restore, split := splitFixture(t)
+	}})
 	m := openSplitManifest(t, split)
 
 	called := false
@@ -794,8 +791,7 @@ func TestForgottenCloseFailsRestore(t *testing.T) {
 	}
 	// NO w.Close() — this is the bug being guarded against.
 
-	testInjectCiphertext = func() []byte { return ct.Bytes() }
-	t.Cleanup(func() { testInjectCiphertext = nil })
+	split.deps.injectCiphertext = func() []byte { return ct.Bytes() }
 
 	if _, err := Split(context.Background(), split, io.Discard); err != nil {
 		t.Fatal(err)
@@ -951,10 +947,13 @@ func (c *cancelOnWrite) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func splitFixture(t *testing.T) (RestoreOptions, SplitOptions) {
+func splitFixture(t *testing.T, extra ...deps) (RestoreOptions, SplitOptions) {
 	t.Helper()
 	outDir := t.TempDir()
 	split := validOpts(t, outDir)
+	if len(extra) > 0 {
+		split.deps = extra[0]
+	}
 	if _, err := Split(context.Background(), split, io.Discard); err != nil {
 		t.Fatal(err)
 	}

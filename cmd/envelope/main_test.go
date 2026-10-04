@@ -683,7 +683,12 @@ func mustRun(t *testing.T, args ...string) {
 
 func mustRunTerm(t *testing.T, term pipeline.Terminal, args ...string) {
 	t.Helper()
-	code := runWith(args, io.Discard, io.Discard, term)
+	mustRunTermObserve(t, term, nil, args...)
+}
+
+func mustRunTermObserve(t *testing.T, term pipeline.Terminal, observe func(int), args ...string) {
+	t.Helper()
+	code := runApp(args, &app{stdout: io.Discard, stderr: io.Discard, term: term, bindObserve: observe})
 	if code != exitOK {
 		t.Fatalf("run %v: exit = %d", args, code)
 	}

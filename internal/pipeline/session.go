@@ -57,6 +57,31 @@ type deps struct {
 	// The zero value records nothing.
 	observeRun func(int)
 
+	// observeSplit receives the identity-side Unwrap count after Split
+	// returns, before the key set is zeroed. The zero value records nothing.
+	observeSplit func(int)
+
+	// observeBind receives the pin-unwrap count from add-recipient, before
+	// the key set is zeroed. The zero value records nothing.
+	observeBind func(int)
+
+	// injectCiphertext, when set, replaces encryption. Tests inject a stream
+	// that was never closed. The zero value encrypts the input.
+	injectCiphertext func() []byte
+
+	// atCiphertext observes the ciphertext after encryption. The zero value
+	// does nothing.
+	atCiphertext func([]byte)
+
+	// failManifestWrite, when set, runs after shards are on disk and before
+	// the manifest is created. Tests inject a crash in that window. The zero
+	// value writes the manifest.
+	failManifestWrite func() error
+
+	// beforeShardWrite runs at the start of each shard write. Tests cancel
+	// there. The zero value does nothing.
+	beforeShardWrite func(int)
+
 	// txn is copied into filetxn.Begin. The transaction stays with the writer.
 	// The zero value is production: os.Rename, os.Remove, and a directory sync
 	// that tolerates EINVAL and ENOTSUP.
@@ -91,6 +116,24 @@ func (d deps) withDefaults() deps {
 	}
 	if d.observeRun != nil {
 		base.observeRun = d.observeRun
+	}
+	if d.observeSplit != nil {
+		base.observeSplit = d.observeSplit
+	}
+	if d.observeBind != nil {
+		base.observeBind = d.observeBind
+	}
+	if d.injectCiphertext != nil {
+		base.injectCiphertext = d.injectCiphertext
+	}
+	if d.atCiphertext != nil {
+		base.atCiphertext = d.atCiphertext
+	}
+	if d.failManifestWrite != nil {
+		base.failManifestWrite = d.failManifestWrite
+	}
+	if d.beforeShardWrite != nil {
+		base.beforeShardWrite = d.beforeShardWrite
 	}
 	if d.txn.Rename != nil {
 		base.txn.Rename = d.txn.Rename

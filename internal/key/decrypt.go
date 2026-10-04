@@ -11,17 +11,21 @@ import (
 	"github.com/rootwarp/envelope/internal/crypt"
 )
 
-// decryptAge is the single production call site for age.Decrypt in this
-// package. Tests replace it to assert every call receives one identity.
-var decryptAge = func(r io.Reader, ids ...age.Identity) (io.Reader, error) {
+// decryptAge is the only age.Decrypt call in this package. WithDecrypt
+// replaces it. The default is this function: one identity, then age.Decrypt.
+func decryptAge(r io.Reader, ids ...age.Identity) (io.Reader, error) {
 	if len(ids) != 1 {
 		return nil, errors.New("age.Decrypt must receive exactly one identity")
 	}
 	return age.Decrypt(r, ids[0])
 }
 
-func decryptOne(r io.Reader, id age.Identity) (io.Reader, error) {
-	return decryptAge(r, id)
+func (s *Set) decryptOne(r io.Reader, id age.Identity) (io.Reader, error) {
+	fn := decryptAge
+	if s != nil && s.decrypt != nil {
+		fn = s.decrypt
+	}
+	return fn(r, id)
 }
 
 // pluginIdentity records Unwrap's outcome so diagnose can tell three cases
@@ -79,7 +83,7 @@ func (s *Set) decryptBytes(blob []byte) ([]byte, *Identity, error) {
 	err := s.eachIdentity(func(id *Identity, ageID age.Identity) error {
 		var err error
 		if id.kind == KindPlugin {
-			plain, err = decryptPluginBytes(blob, ageID)
+			plain, err = s.decryptPluginBytes(blob, ageID)
 		} else {
 			plain, err = crypt.DecryptBytes(blob, ageID)
 		}
@@ -107,7 +111,7 @@ func (s *Set) DecryptTo(dst io.Writer, open func() io.Reader) (int64, error) {
 	err := s.eachIdentity(func(id *Identity, ageID age.Identity) error {
 		var err error
 		if id.kind == KindPlugin {
-			payload, err = decryptOne(open(), ageID)
+			payload, err = s.decryptOne(open(), ageID)
 		} else {
 			payload, err = crypt.Open(open(), ageID)
 		}
@@ -180,8 +184,8 @@ func (s *Set) eachIdentity(try func(*Identity, age.Identity) error) error {
 	return errors.Join(errs...)
 }
 
-func decryptPluginBytes(blob []byte, id age.Identity) ([]byte, error) {
-	r, err := decryptOne(bytes.NewReader(blob), id)
+func (s *Set) decryptPluginBytes(blob []byte, id age.Identity) ([]byte, error) {
+	r, err := s.decryptOne(bytes.NewReader(blob), id)
 	if err != nil {
 		return nil, err
 	}

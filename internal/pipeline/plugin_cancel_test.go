@@ -102,16 +102,17 @@ func TestSplitCancelledPromptStopsPluginWalk(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	term := &cancelReadTerm{cancel: cancel}
-	n := observeSplitSet(t)
 	out := t.TempDir()
-	_, err := Split(ctx, SplitOptions{
+	opts := SplitOptions{
 		IdentityPath: bundle,
 		InPath:       in,
 		OutDir:       out,
 		K:            3,
 		N:            5,
 		Terminal:     term,
-	}, io.Discard)
+	}
+	n := observeSplitSet(t, &opts)
+	_, err := Split(ctx, opts, io.Discard)
 	if err == nil {
 		t.Fatal("err = nil, want cancel")
 	}
@@ -285,14 +286,6 @@ func TestSplitPinFailureRemovesOnlyItsOwnFiles(t *testing.T) {
 	// Pin unwrap runs before any shard is written, so these files are not
 	// this run's. Abort must leave them and remove anything the run created.
 	foreign := []string{shardFileName(0), "manifest.age", "manifest.age.tmp"}
-	testAtCiphertext = func([]byte) {
-		for _, name := range foreign {
-			if err := os.WriteFile(filepath.Join(out, name), []byte("x"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	t.Cleanup(func() { testAtCiphertext = nil })
 
 	_, err := Split(context.Background(), SplitOptions{
 		IdentityPath: bundle,
@@ -301,6 +294,13 @@ func TestSplitPinFailureRemovesOnlyItsOwnFiles(t *testing.T) {
 		K:            3,
 		N:            5,
 		Terminal:     stubTerm{},
+		deps: deps{atCiphertext: func([]byte) {
+			for _, name := range foreign {
+				if err := os.WriteFile(filepath.Join(out, name), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
 	}, io.Discard)
 	if err == nil {
 		t.Fatal("err = nil, want pin-unwrap failure")

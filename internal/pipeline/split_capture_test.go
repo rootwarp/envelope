@@ -22,9 +22,6 @@ func TestSplitCaptureFrozen(t *testing.T) {
 	for i := range ct {
 		ct[i] = byte(i)
 	}
-	testInjectCiphertext = func() []byte { return ct }
-	t.Cleanup(func() { testInjectCiphertext = nil })
-
 	idPath := materialiseGoldenIdentity(t, goldenV1Dir(t))
 	inPath := filepath.Join(t.TempDir(), "in.bin")
 	if err := os.WriteFile(inPath, []byte{0}, 0o600); err != nil {
@@ -37,6 +34,7 @@ func TestSplitCaptureFrozen(t *testing.T) {
 		OutDir:       outDir,
 		K:            3,
 		N:            5,
+		deps:         deps{injectCiphertext: func() []byte { return ct }},
 	}, io.Discard); err != nil {
 		t.Fatal(err)
 	}

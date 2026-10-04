@@ -43,8 +43,6 @@ func TestSplitFRYK05WrapOKUnwrapFails(t *testing.T) {
 	}
 	out := t.TempDir()
 	encrypted := false
-	testAtCiphertext = func([]byte) { encrypted = true }
-	t.Cleanup(func() { testAtCiphertext = nil })
 
 	_, err := Split(context.Background(), SplitOptions{
 		IdentityPath: bundle,
@@ -53,6 +51,7 @@ func TestSplitFRYK05WrapOKUnwrapFails(t *testing.T) {
 		K:            3,
 		N:            5,
 		Terminal:     stubTerm{},
+		deps:         deps{atCiphertext: func([]byte) { encrypted = true }},
 	}, io.Discard)
 	if err == nil {
 		t.Fatal("err = nil, want pin unwrap failure")
@@ -203,8 +202,6 @@ func TestSplitDuplicateRecipientOneStanza(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	testAtCiphertext = func(ct []byte) { n = ageStanzaCount(ct) }
-	t.Cleanup(func() { testAtCiphertext = nil })
 
 	if _, err := Split(context.Background(), SplitOptions{
 		IdentityPath: bundle,
@@ -213,6 +210,7 @@ func TestSplitDuplicateRecipientOneStanza(t *testing.T) {
 		OutDir:       t.TempDir(),
 		K:            3,
 		N:            5,
+		deps:         deps{atCiphertext: func(ct []byte) { n = ageStanzaCount(ct) }},
 	}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -360,9 +358,10 @@ func TestSplitDisjointRecipientWarns(t *testing.T) {
 func TestSplitInteractionsV1ZeroV2Pin(t *testing.T) {
 	skipWindows(t)
 	t.Run("v1", func(t *testing.T) {
-		got := observeSplitSet(t)
 		out := t.TempDir()
-		if _, err := Split(context.Background(), validOpts(t, out), io.Discard); err != nil {
+		opts := validOpts(t, out)
+		got := observeSplitSet(t, &opts)
+		if _, err := Split(context.Background(), opts, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if *got != 0 {
@@ -389,15 +388,16 @@ func TestSplitInteractionsV1ZeroV2Pin(t *testing.T) {
 		if err := os.WriteFile(in, []byte{1}, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := observeSplitSet(t)
-		if _, err := Split(context.Background(), SplitOptions{
+		opts := SplitOptions{
 			IdentityPath: bundle,
 			InPath:       in,
 			OutDir:       t.TempDir(),
 			K:            3,
 			N:            5,
 			Terminal:     stubTerm{},
-		}, io.Discard); err != nil {
+		}
+		got := observeSplitSet(t, &opts)
+		if _, err := Split(context.Background(), opts, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if *got != 1 {
@@ -427,15 +427,16 @@ func TestSplitInteractionsV1ZeroV2Pin(t *testing.T) {
 		if err := os.WriteFile(in, []byte{1}, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := observeSplitSet(t)
-		if _, err := Split(context.Background(), SplitOptions{
+		opts := SplitOptions{
 			IdentityPath: bundle,
 			InPath:       in,
 			OutDir:       t.TempDir(),
 			K:            3,
 			N:            5,
 			Terminal:     stubTerm{},
-		}, io.Discard); err != nil {
+		}
+		got := observeSplitSet(t, &opts)
+		if _, err := Split(context.Background(), opts, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		if *got != 2 {
@@ -791,12 +792,11 @@ func fmtSolePluginWarning(rec string) string {
 	return "only one recipient (" + rec + "): if that key is lost, reset or replaced by a firmware recall, this payload is gone. `envelope bind -add-recipient` adds a recovery recipient, but only for future splits.\n"
 }
 
-func observeSplitSet(t *testing.T) *int {
+func observeSplitSet(t *testing.T, opts *SplitOptions) *int {
 	t.Helper()
 	n := new(int)
 	*n = -1
-	ObserveSplitInteractions = func(got int) { *n = got }
-	t.Cleanup(func() { ObserveSplitInteractions = nil })
+	opts.deps.observeSplit = func(got int) { *n = got }
 	return n
 }
 

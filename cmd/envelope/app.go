@@ -12,13 +12,15 @@ import (
 	"github.com/rootwarp/envelope/internal/pipeline"
 )
 
-// app is one run's writers and, when a test supplies one, its terminal.
-// Closures capture it so nothing lives at package scope. Production leaves
-// term nil so pipeline opens /dev/tty on demand. cmd/envelope must not
-// import internal/key.
+// app is one run's writers and, when a test supplies them, its terminal and
+// bind seams. Closures capture it so nothing lives at package scope.
+// Production leaves term nil so pipeline opens /dev/tty on demand, and
+// leaves the bind seams nil. cmd/envelope must not import internal/key.
 type app struct {
 	stdout, stderr io.Writer
 	term           pipeline.Terminal
+	bindRename     func(string, string) error
+	bindObserve    func(int)
 }
 
 type cmdSpec struct {
@@ -32,7 +34,10 @@ func newApp(stdout, stderr io.Writer) *cli.Command {
 }
 
 func newAppWith(stdout, stderr io.Writer, term pipeline.Terminal) *cli.Command {
-	a := &app{stdout: stdout, stderr: stderr, term: term}
+	return appCommand(&app{stdout: stdout, stderr: stderr, term: term})
+}
+
+func appCommand(a *app) *cli.Command {
 	return &cli.Command{
 		Name:      "envelope",
 		Usage:     summaryRoot,

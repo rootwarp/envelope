@@ -216,12 +216,13 @@ func ReadBundleFile(path string) (*IdentityFile, error) {
 
 // WriteNew is keygen's durability sequence: O_EXCL 0600, write, Sync, Close,
 // Chmod 0600, sync the directory. ErrIdentityExists on an existing path.
-func WriteNew(path string, b *Bundle) error {
+// WithFailWrite replaces Sync; the default is production, a real Sync.
+func WriteNew(path string, b *Bundle, opts ...SetOption) error {
 	data, err := marshalBundle(b)
 	if err != nil {
 		return err
 	}
-	if err := writeNew0600(path, data); err != nil {
+	if err := writeNew0600(path, data, failWrite(opts)); err != nil {
 		return err
 	}
 	b.Path = path
@@ -229,16 +230,18 @@ func WriteNew(path string, b *Bundle) error {
 }
 
 // Replace writes path+".tmp" with WriteNew's sequence, then renames onto path
-// and syncs the directory. The rename is the commit point. A cancellation
-// observed before it removes only the temporary file this call created. One
-// observed after the rename lets the directory sync finish. Never in place.
-func Replace(ctx context.Context, path string, b *Bundle) error {
+// and syncs the directory. The rename is the commit point. txn.Rename
+// replaces os.Rename; the zero Options value is production. A cancellation
+// observed before the rename removes only the temporary file this call
+// created. One observed after the rename lets the directory sync finish.
+// Never in place. WithFailWrite replaces Sync; the default is a real Sync.
+func Replace(ctx context.Context, path string, b *Bundle, txnOpts filetxn.Options, opts ...SetOption) error {
 	data, err := marshalBundle(b)
 	if err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	txn := filetxn.Begin(filepath.Dir(path), filetxn.Options{Rename: ReplaceRename})
+	txn := filetxn.Begin(filepath.Dir(path), txnOpts)
 	f, err := txn.Create(tmp, 0o600)
 	if err != nil {
 		// EEXIST owns nothing, so do not abort: tmp belongs to someone else
@@ -248,7 +251,7 @@ func Replace(ctx context.Context, path string, b *Bundle) error {
 		}
 		return err
 	}
-	if err := writeNew0600Opened(txn, f, tmp, data); err != nil {
+	if err := writeNew0600Opened(txn, f, tmp, data, failWrite(opts)); err != nil {
 		_ = txn.Abort()
 		return err
 	}
@@ -262,9 +265,15 @@ func Replace(ctx context.Context, path string, b *Bundle) error {
 	return nil
 }
 
-// ReplaceRename replaces os.Rename in Replace. Tests inject a failure
-// between the tmp write and the commit.
-var ReplaceRename func(oldpath, newpath string) error
+func failWrite(opts []SetOption) func() error {
+	s := &Set{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s.failWrite
+}
 
 func marshalBundle(b *Bundle) ([]byte, error) {
 	if b == nil {

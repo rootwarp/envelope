@@ -41,10 +41,6 @@ func ValidateKN(k, n int) error {
 	return erasure.Validate(k, n)
 }
 
-// ObserveSplitInteractions receives the identity-side Unwrap count after Split
-// returns, before Zero. Tests assert v1=0 / v2=p·q with it.
-var ObserveSplitInteractions func(int)
-
 func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitReport, error) {
 	// Validate before any filesystem call so a bad (k, n) cannot leave a
 	// half-created directory.
@@ -68,8 +64,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err != nil {
 		return nil, err
 	}
-	if ObserveSplitInteractions != nil {
-		defer func() { ObserveSplitInteractions(set.Interactions()) }()
+	if sess.deps.observeSplit != nil {
+		defer func() { sess.deps.observeSplit(set.Interactions()) }()
 	}
 
 	// One invocation-level boolean, decided before -in or -out is touched.
@@ -145,8 +141,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 
 	var buf bytes.Buffer
 	var ciphertextLen int64
-	if testInjectCiphertext != nil {
-		buf.Write(testInjectCiphertext())
+	if sess.deps.injectCiphertext != nil {
+		buf.Write(sess.deps.injectCiphertext())
 		ciphertextLen = int64(buf.Len())
 	} else {
 		ciphertextLen, err = rs.Encrypt(&buf, ctxReader(ctx, in))
@@ -157,8 +153,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if err := abortCanceledSplit(ctx, txn); err != nil {
 		return nil, err
 	}
-	if testAtCiphertext != nil {
-		testAtCiphertext(buf.Bytes())
+	if sess.deps.atCiphertext != nil {
+		sess.deps.atCiphertext(buf.Bytes())
 	}
 
 	// reedsolomon's ErrShortData names neither the parameter nor the file. Envelope's own
@@ -201,8 +197,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 
 	digests := make([][]byte, opts.N)
 	for i, shard := range shards {
-		if testBeforeShardWrite != nil {
-			testBeforeShardWrite(i)
+		if sess.deps.beforeShardWrite != nil {
+			sess.deps.beforeShardWrite(i)
 		}
 		if err := abortCanceledSplit(ctx, txn); err != nil {
 			return nil, err
@@ -242,8 +238,8 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	// Commit marker: a crash between the last shard and this write leaves
 	// unusable ciphertext, never a false success. The marker is published by
 	// rename after the tmp file is synced. This return does not abort.
-	if testFailManifestWrite != nil {
-		if err := testFailManifestWrite(); err != nil {
+	if sess.deps.failManifestWrite != nil {
+		if err := sess.deps.failManifestWrite(); err != nil {
 			return nil, err
 		}
 	}
@@ -279,22 +275,6 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		StripeLen:     stripeLen,
 	}, nil
 }
-
-// testFailManifestWrite, when set, runs after shards are on disk and before
-// manifest.age is created. Tests inject a crash in that window.
-var testFailManifestWrite func() error
-
-// testAtCiphertext observes the ciphertext after Encrypt. Tests record its
-// SHA-256 to assert Join used the manifest length.
-var testAtCiphertext func([]byte)
-
-// testInjectCiphertext, when set, replaces crypt.Encrypt. Tests inject a
-// closeless age stream so Split records the short counted length.
-var testInjectCiphertext func() []byte
-
-// testBeforeShardWrite runs at the start of each shard write. Tests cancel ctx
-// after the first shard to prove incomplete output is removed.
-var testBeforeShardWrite func(i int)
 
 const solePluginWarningFmt = "only one recipient (%s): if that key is lost, reset or replaced by a firmware recall, this payload is gone. `envelope bind -add-recipient` adds a recovery recipient, but only for future splits.\n"
 
