@@ -54,29 +54,45 @@ func (p *pluginIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 }
 
 // DecryptBytes tries each identity in its own age.Decrypt call, in Set order,
-// and returns the first success. decryptHdr continues only on
-// ErrIncorrectIdentity and returns any other error immediately
-// (age.go:361-371); for hardware plugins the ordinary backup case — a second
-// key in a drawer — is that other kind and is fatal without this loop.
-// Failures are joined so one identity cannot suppress the rest.
+// and returns the first success. The identity that succeeded is discarded;
+// manifest opening uses decryptBytes so the MAC key can follow that identity.
 func (s *Set) DecryptBytes(blob []byte) ([]byte, error) {
+	plain, _, err := s.decryptBytes(blob)
+	return plain, err
+}
+
+// decryptBytes is DecryptBytes plus the identity whose attempt succeeded.
+// eachIdentity returns nil only after the last attempt it ran succeeded, so
+// the identity captured in that closure is the one that opened the blob.
+// decryptHdr continues only on ErrIncorrectIdentity and returns any other
+// error immediately (age.go:361-371); for hardware plugins the ordinary
+// backup case — a second key in a drawer — is that other kind and is fatal
+// without this loop. Failures are joined so one identity cannot suppress the rest.
+func (s *Set) decryptBytes(blob []byte) ([]byte, *Identity, error) {
 	if int64(len(blob)) > crypt.MaxBytes {
-		return nil, crypt.ErrBlobTooLarge
+		return nil, nil, crypt.ErrBlobTooLarge
 	}
-	var plain []byte
+	var (
+		plain  []byte
+		opener *Identity
+	)
 	err := s.eachIdentity(func(id *Identity, ageID age.Identity) error {
 		var err error
 		if id.kind == KindPlugin {
 			plain, err = decryptPluginBytes(blob, ageID)
+		} else {
+			plain, err = crypt.DecryptBytes(blob, ageID)
+		}
+		if err != nil {
 			return err
 		}
-		plain, err = crypt.DecryptBytes(blob, ageID)
-		return err
+		opener = id
+		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return plain, nil
+	return plain, opener, nil
 }
 
 // DecryptTo streams a payload in two phases. Selection tries identities until

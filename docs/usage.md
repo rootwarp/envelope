@@ -576,7 +576,7 @@ gate in front of an exportable key.
 | `shard set is damaged: at least one shard failed its digest` | `verify` found a digest failure on a still-restorable set | Same as `result: damaged`; stderr names the failing indices |
 | `H of N shards matched the manifest — the manifest may not belong to this shard set` | The manifest is from a different split than the shards | Use the `manifest.age` that was written with these shards |
 | `no identity matched the file: …` | Wrong identity for this manifest | Use the identity the split was made with |
-| `conflicting manifests: A/manifest.age and B/manifest.age describe different shard sets` | Two `-in` directories hold authentic manifests of the same version that disagree (a genuine conflict within one version) | Use directories from the same split; exits 1 |
+| `conflicting manifests: A/manifest.age and B/manifest.age describe different shard sets` | Two `-in` directories hold authentic manifests of the same version that disagree (a genuine conflict within one version), including two owners' manifests in one run | Use directories from the same split; exits 1 |
 | `conflicting manifests: … these directories hold manifests from different splits` | Two `-in` directories hold authentic manifests from different splits (a v1 set and a v2 set in one run) | Run each split separately; exits 1 |
 | `-in <path>: <reason>` | A `-in` path does not exist, is not a directory, or cannot be read | Only when two or more `-in` values are given; fix the path. A single missing `-in` still reports `no manifest.age…` |
 | `manifest.age exceeds size limit: …` | `manifest.age` is far larger than a real manifest | Use another copy of the manifest |

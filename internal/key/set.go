@@ -312,6 +312,9 @@ func (s *Set) KeyFor(version, macSource uint32) ([]byte, error) {
 	}
 }
 
+// scalarMACKey is an existence probe only. It reports the first loaded
+// scalar so a plugin-only v1 restore can fail closed before a plugin starts.
+// It is not the key a manifest is verified under.
 func (s *Set) scalarMACKey() ([]byte, error) {
 	for _, id := range s.ids {
 		if id.hasScalar {
@@ -319,6 +322,59 @@ func (s *Set) scalarMACKey() ([]byte, error) {
 		}
 	}
 	return nil, ErrNoScalar
+}
+
+// ManifestKeys is one manifest-opening view of a Set. The binding is per
+// manifest, not per run: two v1 candidates in one multi-directory run may be
+// opened by different native identities, and each manifest's MAC key is the
+// identity that decrypted that blob.
+//
+// Open calls DecryptBytes and then KeyFor for one blob before it returns, so
+// Opens on one ManifestKeys must not run concurrently. The view is not the
+// Set: unwrapping a pin decrypts through the Set and must not replace the
+// identity recorded for the manifest being opened.
+//
+// Do not try every loaded scalar until one MAC verifies. A manifest encrypted
+// to one identity and authenticated under another would then be accepted,
+// which is anyone in the loaded set rather than the identity that could
+// decrypt this blob.
+type ManifestKeys struct {
+	set    *Set
+	opener *Identity
+}
+
+// ManifestKeys returns a fresh per-manifest view of s. The Set's own KeyFor
+// stays the existence probe.
+func (s *Set) ManifestKeys() *ManifestKeys {
+	return &ManifestKeys{set: s}
+}
+
+// DecryptBytes decrypts blob with the Set and records the identity whose
+// attempt succeeded. A later KeyFor for a v1 manifest reads that identity.
+func (m *ManifestKeys) DecryptBytes(blob []byte) ([]byte, error) {
+	plain, opener, err := m.set.decryptBytes(blob)
+	m.opener = opener
+	return plain, err
+}
+
+// KeyIDFor delegates to the Set. A key id belongs to the run's pin, not to
+// which identity opened this blob.
+func (m *ManifestKeys) KeyIDFor(version, macSource uint32) ([]byte, error) {
+	return m.set.KeyIDFor(version, macSource)
+}
+
+// KeyFor returns the HMAC key for this manifest. Version 1, source 0 is the
+// recorded opener's key, or ErrNoScalar when none was recorded. Every other
+// pair is resolved on the Set.
+func (m *ManifestKeys) KeyFor(version, macSource uint32) ([]byte, error) {
+	if version != versionScalar || macSource != macSourceScalar {
+		return m.set.KeyFor(version, macSource)
+	}
+	// The recorded opener only. Another scalar in the Set must not be tried.
+	if m.opener == nil {
+		return nil, ErrNoScalar
+	}
+	return m.opener.ManifestMACKey()
 }
 
 func (s *Set) pinMACKey() ([]byte, error) {

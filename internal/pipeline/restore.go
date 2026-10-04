@@ -95,9 +95,12 @@ type shardSet struct {
 	multi   bool // I4: true after dedup when two or more distinct directories remain
 }
 
+// ManifestKeys, not the Set. The Set's v1 key is an existence probe over the
+// first scalar, and a manifest must be verified under the identity that
+// opened it.
 var (
-	_ manifest.Opener       = (*key.Set)(nil)
-	_ manifest.MACKeySource = (*key.Set)(nil)
+	_ manifest.Opener       = (*key.ManifestKeys)(nil)
+	_ manifest.MACKeySource = (*key.ManifestKeys)(nil)
 )
 
 func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, scanAll bool, status io.Writer, term Terminal) (*shardSet, error) {
@@ -172,11 +175,16 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 		defer clear(macKey)
 	}
 
-	op := manifest.Opener(keys)
+	// One view is both the key source and the opener, so the MAC key is the
+	// identity that decrypted this blob. Open calls DecryptBytes then KeyFor
+	// for one blob before the next, which is why this view is not shared
+	// across concurrent opens.
+	mk := keys.ManifestKeys()
+	op := manifest.Opener(mk)
 	if testWrapManifestOpener != nil {
 		op = testWrapManifestOpener(op)
 	}
-	m, err := chooseManifest(groups, keys, op, identitySource(keys, identityPaths), multi, status)
+	m, err := chooseManifest(groups, mk, op, identitySource(keys, identityPaths), multi, status)
 	if err != nil {
 		return nil, err
 	}
