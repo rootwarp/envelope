@@ -389,9 +389,22 @@ func (s *Set) BareFileIdentity() bool {
 	return id.kind == KindNative && id.hasScalar
 }
 
-// Zero best-effort clears in-memory scalars and drops the memoized pin MAC
+// ResolveTerminal opens this run's terminal if it is not already open.
+// A nil Set or UI returns ErrNoTerminal. The caller does not close the handle.
+func (s *Set) ResolveTerminal() error {
+	if s == nil || s.ui == nil {
+		return ErrNoTerminal
+	}
+	_, err := s.ui.terminal()
+	return err
+}
+
+// Zero is the single, re-armable, idempotent cleanup path for a Set.
+// It best-effort clears in-memory scalars and drops the memoized pin MAC
 // key. It cannot scrub copies already made by hkdf.Key or the garbage
-// collector. Memoization is per Set, so Zero must drop it.
+// collector. Memoization is per Set, so Zero must drop it. The terminal
+// handle is forgotten, so a Set used again opens a fresh one, and a second
+// Zero closes nothing further.
 func (s *Set) Zero() {
 	if s == nil {
 		return
@@ -405,4 +418,5 @@ func (s *Set) Zero() {
 	s.macErr = nil
 	s.macReady = false
 	s.macMu.Unlock()
+	_ = s.ui.Close()
 }

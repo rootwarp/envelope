@@ -72,6 +72,7 @@ func bindCreate(opts BindOptions) (*BindReport, error) {
 	// Wrap talks to the plugin client through ClientUI; a nil UI panics
 	// even when encryption to a plugin recipient is card-free.
 	ui := key.NewClientUI(terminalSource(opts.Terminal))
+	defer ui.Close() // a plugin may message during Wrap; that handle is ours
 	rs, err := key.ParseRecipients(opts.Recipients, ui)
 	if err != nil {
 		return nil, err
@@ -111,7 +112,7 @@ func bindAddRecipient(opts BindOptions) (*BindReport, error) {
 		return nil, err
 	}
 	defer set.Zero()
-	if err := refuseInteractiveWithoutTerminal(set, src); err != nil {
+	if err := refuseInteractiveWithoutTerminal(set); err != nil {
 		return nil, err
 	}
 	if err := b.AddRecipients(set, extra); err != nil {

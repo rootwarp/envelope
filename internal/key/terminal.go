@@ -18,7 +18,21 @@ type Terminal interface {
 // TerminalSource opens the terminal on demand. A nil source, or one that
 // returns ErrNoTerminal, makes every interactive identity fail closed before
 // its plugin starts.
+//
+// Whoever calls a source owns what it returns and closes it exactly once.
+// A caller that keeps its terminal passes Borrow(t).
 type TerminalSource func() (Terminal, error)
+
+// Borrow returns a source over t. Close on the handle it returns does nothing:
+// the caller keeps t and is the one that closes it.
+func Borrow(t Terminal) TerminalSource {
+	return func() (Terminal, error) { return borrowed{t}, nil }
+}
+
+// borrowed prompts through t without taking ownership of it.
+type borrowed struct{ Terminal }
+
+func (borrowed) Close() error { return nil }
 
 // ErrNoTerminal is returned when /dev/tty cannot be opened. The failed open
 // is the non-TTY detection.

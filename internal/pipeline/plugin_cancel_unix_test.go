@@ -20,7 +20,7 @@ type gateTerm struct {
 }
 
 func (g *gateTerm) Notify(string) {}
-func (g *gateTerm) Close() error  { return nil }
+func (g *gateTerm) Close() error  { panic("borrowed terminal Close called") }
 
 func (g *gateTerm) ReadLine(string, bool) (string, error) {
 	select {

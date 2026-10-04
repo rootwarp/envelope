@@ -107,6 +107,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 			return nil, key.ErrNoPin
 		}
 		ui := key.NewClientUI(src)
+		defer ui.Close() // a plugin may message during Wrap; that handle is ours
 		rs, err = key.ParseRecipients(recStrs, ui)
 		if err != nil {
 			return nil, err
@@ -164,7 +165,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		// and before the first shard write (FR-YK-04). A plugin-prompt
 		// interruption is an S9 error: shards written before this return
 		// (none, unless a test injected them) must not survive.
-		if err := refuseInteractiveWithoutTerminal(set, src); err != nil {
+		if err := refuseInteractiveWithoutTerminal(set); err != nil {
 			removeIncompleteSplit(opts.OutDir)
 			return nil, err
 		}

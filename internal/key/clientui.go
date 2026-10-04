@@ -111,6 +111,25 @@ func (u *ClientUI) terminal() (Terminal, error) {
 	return t, nil
 }
 
+// Close closes the terminal this UI opened and forgets it. A nil UI and a
+// second call are no-ops. Forgetting the handle is what lets a later prompt
+// open a fresh one instead of writing to the one just closed.
+func (u *ClientUI) Close() error {
+	if u == nil {
+		return nil
+	}
+	u.mu.Lock()
+	t := u.got
+	u.got = nil
+	u.gotErr = nil
+	u.termOK = false
+	u.mu.Unlock()
+	if t == nil {
+		return nil
+	}
+	return t.Close()
+}
+
 func (u *ClientUI) displayMessage(_, message string) error {
 	t, err := u.terminal()
 	if err != nil {

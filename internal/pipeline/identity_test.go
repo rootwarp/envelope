@@ -27,7 +27,7 @@ type stubTerm struct{}
 
 func (stubTerm) Notify(string)                         {}
 func (stubTerm) ReadLine(string, bool) (string, error) { return "", errors.New("no pin") }
-func (stubTerm) Close() error                          { return nil }
+func (stubTerm) Close() error                          { panic("borrowed terminal Close called") }
 
 func writePluginIdentity(t *testing.T, name string, mode fakeplugin.Mode) string {
 	t.Helper()

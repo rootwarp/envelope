@@ -35,7 +35,7 @@ func captureTestContext(ctx context.Context) {
 
 func terminalSource(t Terminal) key.TerminalSource {
 	if t != nil {
-		return func() (key.Terminal, error) { return t, nil }
+		return key.Borrow(t)
 	}
 	if testOpenTerminal != nil {
 		return testOpenTerminal
@@ -83,21 +83,17 @@ func identitySource(s *key.Set, paths []string) string {
 // refuseInteractiveWithoutTerminal fails closed before a plugin process starts
 // (FR-YK-13). A native identity with a scalar never opens the terminal, so a
 // mixed set still restores a v1 shard set with zero plugin interactions.
-func refuseInteractiveWithoutTerminal(s *key.Set, src key.TerminalSource) error {
+// The preflight resolves the run's handle and closes nothing.
+func refuseInteractiveWithoutTerminal(s *key.Set) error {
 	if s == nil || !s.Interactive() {
 		return nil
 	}
 	if nativeScalar(s) != nil {
 		return nil
 	}
-	if src == nil {
+	if err := s.ResolveTerminal(); err != nil {
 		return ErrNoPinTerminal
 	}
-	t, err := src()
-	if err != nil || t == nil {
-		return ErrNoPinTerminal
-	}
-	_ = t.Close()
 	return nil
 }
 

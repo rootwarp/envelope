@@ -138,7 +138,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	}
 	// Plugin-only: refuse with no TTY before any age-plugin-* process (FR-YK-13).
 	// A native-with-scalar set never opens the terminal here (YK-08 decrypts natives first).
-	if err := refuseInteractiveWithoutTerminal(keys, src); err != nil {
+	if err := refuseInteractiveWithoutTerminal(keys); err != nil {
 		keys.Zero()
 		return nil, err
 	}

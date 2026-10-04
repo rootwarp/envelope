@@ -23,7 +23,7 @@ func (pinTerm) Notify(string) {}
 func (pinTerm) ReadLine(string, bool) (string, error) {
 	return fakeplugin.PIN, nil
 }
-func (pinTerm) Close() error { return nil }
+func (pinTerm) Close() error { panic("borrowed terminal Close called") }
 
 func TestSIGINTPluginPromptRestore(t *testing.T) {
 	skipWindows(t)
