@@ -320,6 +320,7 @@ not part of the contract.
 |---|---|
 | 0 | Success (`verify` `healthy`/`degraded`); explicit help (`-h`, `-help`, `--help`); `help`; `help <command>`; `completion <shell>`; `-version`; `recipient` |
 | 1 | Operation failed (`verify` `damaged`/`unrestorable`); the reason is on stderr |
+| 1 | The requested output could not be written to stdout |
 | 2 | Bad usage: unknown command, missing flag, or invalid `(k, n)` |
 
 stdout carries only what the operator asked a command to produce: version info,

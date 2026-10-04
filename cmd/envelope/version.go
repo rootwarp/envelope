@@ -20,7 +20,8 @@ func writeVersion(w io.Writer, info *debug.BuildInfo, ok bool) error {
 	if !ok {
 		return errors.New("build info unavailable")
 	}
-	fmt.Fprintf(w, "envelope %s\n", info.Main.Version)
+	sw := &stickyWriter{w: w}
+	fmt.Fprintf(sw, "envelope %s\n", info.Main.Version)
 	for _, m := range info.Deps {
 		switch m.Path {
 		case "filippo.io/age", "github.com/klauspost/reedsolomon":
@@ -28,8 +29,8 @@ func writeVersion(w io.Writer, info *debug.BuildInfo, ok bool) error {
 			if m.Replace != nil {
 				ver = m.Replace.Version
 			}
-			fmt.Fprintf(w, "%s %s\n", m.Path, ver)
+			fmt.Fprintf(sw, "%s %s\n", m.Path, ver)
 		}
 	}
-	return nil
+	return sw.err
 }

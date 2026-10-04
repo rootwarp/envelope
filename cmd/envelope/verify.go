@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -27,26 +28,33 @@ func (a *app) verifyCommand() *cli.Command {
 				Terminal:      testTerminal,
 			}, a.stderr)
 			if rep != nil {
-				writeVerifyReport(a.stdout, rep) // first, even when err != nil
+				// First, even when err != nil.
+				if werr := writeVerifyReport(a.stdout, rep); werr != nil {
+					// Join only a real write failure. errors.Join(err, nil)
+					// wraps a lone error and changes its identity.
+					return errors.Join(err, werr)
+				}
 			}
 			return err
 		},
 	})
 }
 
-func writeVerifyReport(w io.Writer, rep *pipeline.VerifyReport) {
-	fmt.Fprintf(w, "manifest ok: k=%d n=%d\n", rep.K, rep.N)
+func writeVerifyReport(w io.Writer, rep *pipeline.VerifyReport) error {
+	sw := &stickyWriter{w: w}
+	fmt.Fprintf(sw, "manifest ok: k=%d n=%d\n", rep.K, rep.N)
 	for _, s := range rep.Shards {
-		fmt.Fprintf(w, "%s %s\n", s.Name, s.State)
+		fmt.Fprintf(sw, "%s %s\n", s.Name, s.State)
 	}
-	fmt.Fprintf(w, "usable %d of %d, need %d\n", rep.Usable, rep.N, rep.K)
+	fmt.Fprintf(sw, "usable %d of %d, need %d\n", rep.Usable, rep.N, rep.K)
 	switch {
 	case !rep.PayloadChecked:
-		fmt.Fprintln(w, "payload skipped")
+		fmt.Fprintln(sw, "payload skipped")
 	case !rep.PayloadOK:
-		fmt.Fprintln(w, "payload failed")
+		fmt.Fprintln(sw, "payload failed")
 	default:
-		fmt.Fprintf(w, "payload ok: %d bytes\n", rep.PlaintextLen)
+		fmt.Fprintf(sw, "payload ok: %d bytes\n", rep.PlaintextLen)
 	}
-	fmt.Fprintf(w, "result: %s\n", rep.Result)
+	fmt.Fprintf(sw, "result: %s\n", rep.Result)
+	return sw.err
 }
