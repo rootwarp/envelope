@@ -13,7 +13,7 @@ import (
 
 	"github.com/rootwarp/envelope/internal/crypt"
 
-	_ "golang.org/x/sys/execabs" // NFR-YK-01: pin the execabs module edge as direct
+	_ "golang.org/x/sys/execabs" // pin the execabs package as a direct import
 )
 
 const oneLineMax = 240
@@ -84,10 +84,12 @@ func diagnose(id *Identity, err error) error {
 	return err
 }
 
-// ResolvePlugin returns the absolute path of age-plugin-<name> as first on
-// PATH. execabs (blank-imported above) blocks a relative-directory hijack;
-// an absolute one is still possible, which is why the caller names this path
-// on stderr the first time a plugin would launch (NFR-YK-04).
+// ResolvePlugin returns age-plugin-<name> as os/exec.LookPath finds it.
+// A relative hit in the current directory is exec.ErrDot on this Go version.
+// The blank execabs import above only pins that package as a direct import;
+// it does not wrap this call. An absolute PATH entry can still be a hijack,
+// which is why the caller names this path on stderr the first time a plugin
+// would launch.
 func ResolvePlugin(name string) (string, error) {
 	if name == "" {
 		return "", exec.ErrNotFound

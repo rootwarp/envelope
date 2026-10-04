@@ -606,7 +606,7 @@ func (fx v2fix) sealFix() sealFix {
 	return sealFix{blob: fx.blob, macKey: fx.macKey, id: fx.id}
 }
 
-// recSource is a YK-13 stub resolver. Tests must not use *key.Set.
+// recSource is a stub MACKeySource. Tests must not use *key.Set.
 type recSource struct {
 	keyID []byte
 	key   []byte

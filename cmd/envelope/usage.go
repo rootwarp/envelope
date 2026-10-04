@@ -24,7 +24,7 @@ const (
 	summaryRecipient = "print the public recipient of an identity file"
 	summaryHelp      = "show help for envelope or one command"
 
-	// urfave has no Examples field; Description keeps newlines (research/04 §1).
+	// urfave has no Examples field; Description keeps newlines.
 	descriptionKeygen = `Writes one native age identity line, mode 0600.
 Prints nothing on success and refuses to overwrite: identity file already exists (exit 1).
 Losing the identity is unrecoverable.

@@ -65,7 +65,7 @@ func TestProvenanceComment(t *testing.T) {
 }
 
 func TestDecodeKnownIdentity(t *testing.T) {
-	// Generate at runtime so tracked files never contain the identity prefix+1 token (FR-24).
+	// Generate at runtime so tracked files never contain the identity prefix+1 token.
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)

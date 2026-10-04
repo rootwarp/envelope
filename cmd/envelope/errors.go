@@ -34,7 +34,7 @@ func (a *app) onUsageError(contract string) cli.OnUsageErrorFunc {
 	}
 }
 
-// exitCode is the only exit-code mapping (§9.2).
+// exitCode is the only exit-code mapping.
 func exitCode(err error, stderr io.Writer) int {
 	var ec cli.ExitCoder
 	switch {

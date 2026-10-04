@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Import-graph and grep gates (FR-20, FR-19, FR-24, FR-35, FR-YK-18, FR-YK-08).
-# D1: crypt and erasure never depend on each other (FR-20 AC).
+# Import-graph and grep gates.
+# Crypt and erasure never depend on each other. Tests do not log a payload,
+# plaintext, secret, scalar, or MAC key. Tracked files do not contain a native
+# identity line. Process streams are written only from the entry point. Code
+# under internal/ and cmd/ does not hardcode one plugin name. Nothing puts a
+# child in its own process group.
+# D1: crypt and erasure never depend on each other.
 # D2: pipeline imports only key, crypt, erasure, manifest, filetxn + stdlib.
 # D3: nothing under internal/ imports pipeline; cmd/envelope is its only importer.
 # D4: manifest imports no internal package.
@@ -34,7 +39,7 @@ list_deps() {
 
 mod=$(go list -m)
 
-# D1: crypt and erasure never see each other, in either direction (FR-20 AC).
+# D1: crypt and erasure never see each other, in either direction.
 if [ -d internal/crypt ]; then
 	if list_deps ./internal/crypt | grep -q 'internal/erasure'; then
 		fail "D1: crypt depends on erasure"
@@ -61,7 +66,7 @@ if pkg_exists ./internal/pipeline; then
 	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/internal/pipeline"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./internal/pipeline)
 fi
 
-# D2 (identifier): pipeline and cmd/envelope non-test sources never name an age.* type (AD-2).
+# D2 (identifier): pipeline and cmd/envelope non-test sources never name an age.* type.
 age_id_paths=()
 [ -d internal/pipeline ] && age_id_paths+=(internal/pipeline)
 [ -d cmd/envelope ] && age_id_paths+=(cmd/envelope)
@@ -92,7 +97,7 @@ if pkg_exists ./internal/pipeline; then
 	done < <(go list -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/pipeline"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
-# D4: manifest imports no $mod/internal/... package at all (ADR-0004).
+# D4: manifest imports no $mod/internal/... package at all.
 if pkg_exists ./internal/manifest; then
 	while IFS= read -r dep; do
 		[ -n "$dep" ] || continue
@@ -235,15 +240,16 @@ if pkg_exists ./internal/filetxn; then
 	done < <(go list -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}{{range .TestImports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}{{range .XTestImports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
-# FR-35: no os.Stdout / os.Stderr below the entry point …
+# Process streams are written only from the entry point: no os.Stdout or
+# os.Stderr below it.
 if matches=$(grep -rn 'os\.Std\(out\|err\)' --include='*.go' internal/); then
-	fail "FR-35: os.Stdout/os.Stderr under internal/" "$matches"
+	fail "process streams: os.Stdout/os.Stderr under internal/" "$matches"
 fi
-# … and at most one reference in cmd/envelope, which must be main's one-liner.
+# cmd/envelope may name them only in main's one-liner.
 matches=$(grep -rn 'os\.Std\(out\|err\)' --include='*.go' cmd/envelope/ 2>/dev/null \
 	| grep -v 'os.Exit(run(os.Args\[1:\], os.Stdout, os.Stderr))' || true)
 if [ -n "$matches" ]; then
-	fail "FR-35: os.Stdout/os.Stderr in cmd/envelope besides main's one-liner" "$matches"
+	fail "process streams: os.Stdout/os.Stderr in cmd/envelope besides main's one-liner" "$matches"
 fi
 
 # U1: no framework-global assignment in cmd/envelope (non-test).
@@ -263,14 +269,14 @@ if matches=$(grep -rn --include='*.go' --exclude='*_test.go' 'os\.Remove' cmd/en
 	fail "U4: os.Remove in cmd/envelope" "$matches"
 fi
 
-# FR-19: no t.Log of a payload variable.
+# Tests do not log a payload, plaintext, secret, scalar, or MAC key.
 if matches=$(grep -rn 't\.Logf\?(.*\(plaintext\|payload\|secret\|scalar\|macKey\)' --include='*_test.go' .); then
-	fail "FR-19: t.Log of a payload variable" "$matches"
+	fail "test logs a payload variable (plaintext, payload, secret, scalar, or macKey)" "$matches"
 fi
 
-# FR-24: no identity material in tracked files.
+# Tracked files do not contain a native identity line.
 # Needle is assembled at runtime so this file never contains the prefix+1 string.
 needle="AGE-SECRET-KEY-$((1))"
 if matches=$(git ls-files -z | xargs -0 grep -l -- "$needle"); then
-	fail "FR-24: $needle in tracked files" "$matches"
+	fail "native identity line ($needle) in tracked files" "$matches"
 fi

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// FR-P2-06
+// -version with no build info fails and writes nothing to stdout.
 func TestVersionBuildInfoUnavailable(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	err := writeVersion(&out, nil, false)
@@ -25,7 +25,7 @@ func TestVersionBuildInfoUnavailable(t *testing.T) {
 	}
 }
 
-// FR-P2-06
+// A replaced module's version is the one printed.
 func TestWriteVersionHonorsReplace(t *testing.T) {
 	info := &debug.BuildInfo{
 		Main: debug.Module{Version: "v0.0.0-test"},
@@ -51,7 +51,7 @@ func TestWriteVersionHonorsReplace(t *testing.T) {
 	}
 }
 
-// FR-P2-02
+// -flag v, -flag=v, --flag v, and --flag=v are the same split.
 func TestFlagSyntaxes(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -88,7 +88,7 @@ func TestFlagSyntaxes(t *testing.T) {
 	}
 }
 
-// FR-P2-01
+// A second run does not keep the previous run's flags.
 func TestRunIsReentrant(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -125,7 +125,7 @@ func TestRunIsReentrant(t *testing.T) {
 	})
 }
 
-// FR-P2-05
+// -h prints help and does not keygen, split, restore, or bind.
 func TestHelpDoesNotAct(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -177,7 +177,7 @@ func TestHelpDoesNotAct(t *testing.T) {
 	}
 }
 
-// FR-P2-05
+// Root -h includes every usage contract line.
 func TestRootHelpCarriesContract(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-h"}, &stdout, &stderr); code != exitOK {

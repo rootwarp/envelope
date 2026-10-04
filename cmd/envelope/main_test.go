@@ -211,7 +211,7 @@ func TestVersionPrecedesDispatch(t *testing.T) {
 	}
 }
 
-// FR-19: assert against the injected buffers, not by reassigning process output.
+// Assert against the injected buffers, not by reassigning process output.
 func TestMarkerNeverReachesOutput(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -695,7 +695,7 @@ func writeOpaque(t *testing.T, path string, n int) {
 }
 
 // Framing is unique so a leak is obvious; the interior is random so the
-// fixture is not mnemonic-shaped (FR-19, FR-24).
+// fixture is not mnemonic-shaped and is not an identity line.
 func syntheticMarker(t *testing.T) []byte {
 	t.Helper()
 	const frame = "\x00\xffENV-MARK\xff\x00"

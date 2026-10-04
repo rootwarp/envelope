@@ -51,7 +51,7 @@ type attemptState struct {
 }
 
 // testObserveSeed, when set, receives the unwrapped seed before the two HKDFs.
-// Tests alias that buffer to prove it is cleared before KeyFor returns (I-4).
+// Tests alias that buffer to prove it is cleared before KeyFor returns.
 var testObserveSeed func([]byte)
 
 type SetOption func(*Set)
@@ -310,7 +310,7 @@ func (s *Set) KeyIDFor(version, macSource uint32) ([]byte, error) {
 // KeyFor returns the HMAC key a manifest of this version and source must be
 // verified under.
 //
-//	version 1, source 0: ADR-0003's HKDF over the X25519 scalar. No plugin.
+//	version 1, source 0: HKDF over the X25519 scalar. No plugin.
 //	version 2, source 1: unwraps the bundle's pin through the identity set —
 //	                     one decrypt site (1 to p interactions), memoized per
 //	                     Set for the whole run — derives mac_key and
@@ -460,9 +460,9 @@ func copyMACKey(k []byte) []byte {
 	return out
 }
 
-// BareFileIdentity is the FR-YK-03 boolean: exactly one path, exactly one
-// native X25519 identity, no bundle metadata. The caller still has to check
-// there is no -recipient flag.
+// BareFileIdentity reports exactly one path, exactly one native X25519
+// identity, and no bundle metadata. The caller still has to check there is
+// no -recipient flag.
 func (s *Set) BareFileIdentity() bool {
 	if s == nil || s.nPaths != 1 || s.bundle || len(s.ids) != 1 {
 		return false

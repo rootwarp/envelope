@@ -92,7 +92,7 @@ func TestNewBundleIsOnlySeedWriter(t *testing.T) {
 	bundlePtr := reflect.TypeOf((*Bundle)(nil))
 	for i := 0; i < typ.NumIn(); i++ {
 		if typ.In(i) == bundlePtr {
-			t.Fatal("NewBundle takes *Bundle (I-3)")
+			t.Fatal("NewBundle takes *Bundle")
 		}
 	}
 
@@ -126,10 +126,10 @@ func TestNewBundleIsOnlySeedWriter(t *testing.T) {
 				continue
 			}
 			if callsRandRead(fn) && receiverIsBundle(fn) {
-				t.Errorf("%s: *Bundle method mints a seed (I-3)", fn.Name.Name)
+				t.Errorf("%s: *Bundle method mints a seed", fn.Name.Name)
 			}
 			if fn.Name.IsExported() && fn.Recv == nil && callsRandRead(fn) && takesBundleParam(fn) {
-				t.Errorf("%s: exported function takes *Bundle and reads rand (I-3)", fn.Name.Name)
+				t.Errorf("%s: exported function takes *Bundle and reads rand", fn.Name.Name)
 			}
 		}
 	}

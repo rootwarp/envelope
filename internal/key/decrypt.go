@@ -12,7 +12,7 @@ import (
 )
 
 // decryptAge is the single production call site for age.Decrypt in this
-// package. Tests replace it to assert I-13: every call receives one identity.
+// package. Tests replace it to assert every call receives one identity.
 var decryptAge = func(r io.Reader, ids ...age.Identity) (io.Reader, error) {
 	if len(ids) != 1 {
 		return nil, errors.New("age.Decrypt must receive exactly one identity")
@@ -122,7 +122,7 @@ func (s *Set) DecryptTo(dst io.Writer, open func() io.Reader) (int64, error) {
 // Interactions returns the number of Unwrap attempts made through plugin
 // identities in this run — the identity side only. A Wrap also spawns a
 // plugin process and calls no Unwrap, so this is deliberately not "processes
-// spawned": it is the same quantity §6.3's budget announces, which is why a
+// spawned": it is the same quantity the interaction-budget line announces, which is why a
 // test may compare the two. Tests assert budgets with it; no production path
 // may branch on it.
 func (s *Set) Interactions() int {

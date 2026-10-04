@@ -372,7 +372,7 @@ func TestPluginIdentityRecipientAbsent(t *testing.T) {
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("I-10: %s appears in the tree:\n%s", needle, string(out))
+		t.Fatalf("%s appears in the tree:\n%s", needle, string(out))
 	}
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) || ee.ExitCode() != 1 || len(bytes.TrimSpace(out)) != 0 {
@@ -423,7 +423,7 @@ func TestPluginIdentityRecipientAbsent(t *testing.T) {
 					return true
 				}
 				if pluginIdentityReceiver(sel.X, scope) {
-					t.Errorf("%s: plugin identity .Recipient() (I-10)", fset.Position(call.Pos()))
+					t.Errorf("%s: plugin identity .Recipient()", fset.Position(call.Pos()))
 				}
 				return true
 			})

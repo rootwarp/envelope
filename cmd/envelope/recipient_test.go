@@ -16,7 +16,7 @@ import (
 
 var recipientLine = regexp.MustCompile(`^age1[02-9ac-hj-np-z]{58}\n$`)
 
-// FR-P2-12
+// recipient prints the age recipient and nothing else.
 func TestRecipient(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -50,7 +50,7 @@ func TestRecipient(t *testing.T) {
 	}
 }
 
-// FR-P2-12, NFR-4
+// Failures and successes do not print identity material.
 func TestRecipientNeverLeaks(t *testing.T) {
 	dir := t.TempDir()
 
@@ -146,7 +146,7 @@ func TestRecipientNeverLeaks(t *testing.T) {
 	}
 }
 
-// FR-P2-12
+// recipient does not modify the identity file.
 func TestRecipientLeavesIdentity(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")

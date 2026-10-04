@@ -1,6 +1,6 @@
 # v1 golden shard set
 
-Pinned pre-initiative regression gate (I-1). Produced by a clean build of
+Pinned pre-initiative regression gate. Produced by a clean build of
 `58ed8bd` (`feat(cmd): surface the verify scan-all guarantee`) on `develop`.
 That binary reports `envelope v0.1.1-0.20260919191338-58ed8bd3f5a2`.
 
@@ -18,7 +18,7 @@ that plaintext.
 
 ## Identity is split across two files
 
-`scripts/check-discipline.sh` FR-24 fails the build on any tracked file that
+`scripts/check-discipline.sh` fails the build on any tracked file that
 contains the assembled native-identity prefix, so `identity.txt` cannot live
 here and no exemption is added. `identity.bech32data` is the bech32 data part
 only. Tests materialise the identity line as `key.HRP + "1" +` that data into

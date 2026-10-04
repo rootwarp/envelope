@@ -437,7 +437,7 @@ func assertNoIdentityPrefix(t *testing.T, err error) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	// Split at runtime so tracked files never contain the contiguous FR-24 needle.
+	// Split at runtime so tracked files never contain the contiguous identity prefix.
 	prefix := "AGE-SECRET-KEY-" + "1"
 	msg := err.Error()
 	if strings.Contains(msg, prefix) || strings.Contains(msg, strings.ToLower(prefix)) {

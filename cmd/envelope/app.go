@@ -149,7 +149,7 @@ func (a *app) rootAction(_ context.Context, c *cli.Command) error {
 	for _, cmd := range c.Root().VisibleCommands() {
 		for _, name := range cmd.Names() {
 			if name == "help" || name == "h" {
-				continue // AD-5: never suggest help
+				continue // help is not a suggestion target
 			}
 			names = append(names, name)
 		}

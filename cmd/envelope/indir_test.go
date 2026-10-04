@@ -14,7 +14,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// FR-MD-01 E-MD-2: a directory literally named a,b is one directory.
+// A directory literally named a,b is one directory.
 func TestCommaDirectoryIsOneDirectory(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 	want, err := os.ReadFile(filepath.Join(filepath.Dir(id), "in.bin"))
@@ -50,7 +50,7 @@ func TestCommaDirectoryIsOneDirectory(t *testing.T) {
 	})
 }
 
-// FR-MD-01: every parsing form accumulates in argv order.
+// Every parsing form accumulates in argv order.
 func TestFlagAccumulationForms(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 	want, err := os.ReadFile(filepath.Join(filepath.Dir(id), "in.bin"))
@@ -104,7 +104,7 @@ func TestFlagAccumulationForms(t *testing.T) {
 	}
 }
 
-// FR-MD-01: SliceBase.Set does not TrimSpace string elements.
+// SliceBase.Set does not TrimSpace string elements.
 func TestTrailingSpaceDirectory(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 	want, err := os.ReadFile(filepath.Join(filepath.Dir(id), "in.bin"))
@@ -210,7 +210,7 @@ func TestEmptyInFlag(t *testing.T) {
 	}
 }
 
-// FR-MD-07: existence check runs for two or more given values, before any shard read.
+// Existence check runs for two or more given values, before any shard read.
 func TestInDirMustExist(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 
@@ -296,7 +296,7 @@ func TestInDirMustExist(t *testing.T) {
 	})
 }
 
-// FR-MD-06: duplicate -in values collapse to single-directory streams.
+// Duplicate -in values collapse to single-directory streams.
 func TestDuplicateInDirs(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 	xorFileByte(t, filepath.Join(shards, "shard-02"), 0)
@@ -375,7 +375,7 @@ func TestDuplicateInDirs(t *testing.T) {
 	}
 }
 
-// FR-MD-03 I2: wrong identity across two directories prints once.
+// Wrong identity across two directories prints once.
 func TestWrongIdentityPrintedOnceScattered(t *testing.T) {
 	id, shards, out := mustSplitFixture(t)
 	other := filepath.Join(filepath.Dir(id), "other.txt")
@@ -395,7 +395,7 @@ func TestWrongIdentityPrintedOnceScattered(t *testing.T) {
 	})
 }
 
-// FR-19: marker never appears on either stream over a multi-directory run.
+// Marker never appears on either stream over a multi-directory run.
 func TestScatteredMarkerNeverReachesOutput(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -452,8 +452,8 @@ func TestScatteredMarkerNeverReachesOutput(t *testing.T) {
 	})
 }
 
-// FR-MD-08: multi-dir diagnostics use filepath.Join on the given -in, not EvalSymlinks.
-// Join cleans "./a/shard-01" to "a/shard-01"; the PRD's "./a/shard-01" spelling is not emitted.
+// Multi-dir diagnostics use filepath.Join on the given -in, not EvalSymlinks.
+// Join cleans "./a/shard-01" to "a/shard-01"; the "./a/shard-01" spelling is not emitted.
 func TestAsGivenDiagnosticPath(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 	root := t.TempDir()
@@ -469,7 +469,7 @@ func TestAsGivenDiagnosticPath(t *testing.T) {
 		t.Fatalf("exit = %d, want %d\nstderr: %s", code, exitOK, stderr.String())
 	}
 	got := stderr.String()
-	cleaned := filepath.Join("./a", "shard-01") // "a/shard-01"; PRD "./a/shard-01" is not emitted
+	cleaned := filepath.Join("./a", "shard-01") // "a/shard-01"; the "./a/shard-01" spelling is not emitted
 	if filepath.ToSlash(cleaned) != "a/shard-01" {
 		t.Fatalf("filepath.Join cleaned %q, want a/shard-01", cleaned)
 	}
@@ -478,14 +478,14 @@ func TestAsGivenDiagnosticPath(t *testing.T) {
 		t.Fatalf("stderr %q missing %q", got, want)
 	}
 	if strings.Contains(got, "./a/shard-01") {
-		t.Fatal("stderr used the PRD ./a/shard-01 spelling")
+		t.Fatal("stderr used the ./a/shard-01 spelling")
 	}
 	if strings.Contains(got, root) {
 		t.Fatal("stderr resolved to an absolute path")
 	}
 }
 
-// FR-MD-09: restore -h describes repeatable -in. verify shares the same prose.
+// restore -h describes repeatable -in. verify shares the same prose.
 func TestRestoreHelpDescribesRepeatableIn(t *testing.T) {
 	for _, cmd := range []string{"restore", "verify"} {
 		t.Run(cmd, func(t *testing.T) {
@@ -511,7 +511,7 @@ func TestRestoreHelpDescribesRepeatableIn(t *testing.T) {
 	}
 }
 
-// FR-MD-09: verify -h carries the repeatable-in prose plus the scan-depth sentence.
+// verify -h carries the repeatable-in prose plus the scan-depth sentence.
 func TestVerifyHelpDescribesScanDepth(t *testing.T) {
 	help := commandHelp(t, []string{"verify", "-h"})
 	if !strings.Contains(help, "repeat") && !strings.Contains(help, "repeated") {
@@ -539,7 +539,7 @@ func TestVerifyHelpDescribesScanDepth(t *testing.T) {
 	}
 }
 
-// FR-MD-04 / ADR 0011: a later unreadable decoy is invisible to restore and named by verify.
+// A later unreadable decoy is invisible to restore and named by verify.
 func TestScanDepthDiscriminator(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("chmod 0000 does not deny root")
@@ -583,7 +583,7 @@ func TestScanDepthDiscriminator(t *testing.T) {
 	}
 }
 
-// NFR-MD-3: neither command writes into -in, including a mixed-mode pair.
+// Neither command writes into -in, including a mixed-mode pair.
 func TestVerifyWritesNothingScattered(t *testing.T) {
 	id, shards, _ := mustSplitFixture(t)
 
@@ -721,7 +721,7 @@ func scatterCLI(t *testing.T, src string, d int) []string {
 	return dirs
 }
 
-// mixedModeDirs is NFR-MD-3's fixture: one writable directory, one 0555 with 0444 files.
+// mixedModeDirs is the fixture: one writable directory, one 0555 with 0444 files.
 func mixedModeDirs(t *testing.T, shards string) (root, rw, ro string) {
 	t.Helper()
 	root = t.TempDir()

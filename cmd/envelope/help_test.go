@@ -9,7 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// FR-P2-09
+// help, h, and help of a command match the corresponding --help text.
 func TestHelpEquivalence(t *testing.T) {
 	tests := []struct {
 		name string
@@ -44,7 +44,7 @@ func TestHelpEquivalence(t *testing.T) {
 	}
 }
 
-// FR-P2-09
+// help with a bad flag or an unknown topic is usage, not a help page.
 func TestHelpCommandUsageErrors(t *testing.T) {
 	t.Run("help -bogus", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
@@ -87,7 +87,7 @@ func TestHelpCommandUsageErrors(t *testing.T) {
 	}
 }
 
-// FR-P2-09
+// Root help lists the help command once.
 func TestRootHelpListsHelpOnce(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--help"}, &stdout, &stderr); code != exitOK {
@@ -133,7 +133,7 @@ func commandsSection(help string) string {
 	return s
 }
 
-// FR-P2-08
+// Command help pages carry the contract sentences.
 func TestHelpContent(t *testing.T) {
 	pages := []struct {
 		cmd  string
@@ -202,7 +202,7 @@ func commandHelp(t *testing.T, args []string) string {
 	return stdout.String()
 }
 
-// FR-P2-10
+// A usage error names the offending flag or value, then the contract line.
 func TestUsageErrorNames(t *testing.T) {
 	splitKN := []string{"split", "-identity", "id", "-in", "in.bin", "-out", "shards"}
 	tests := []struct {
@@ -244,7 +244,7 @@ func TestUsageErrorNames(t *testing.T) {
 	}
 }
 
-// FR-P2-10
+// An unknown command suggests the nearest name, and never suggests help.
 func TestSuggestion(t *testing.T) {
 	tests := []struct {
 		name string

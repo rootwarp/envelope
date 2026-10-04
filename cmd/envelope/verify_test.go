@@ -66,7 +66,7 @@ result: unrestorable
 `
 )
 
-// FR-P2-13
+// Verify's healthy and unrestorable reports are byte-stable.
 func TestVerifyReportGolden(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
 		id, shards, _ := mustSplitFixture(t)
@@ -159,7 +159,7 @@ result: unrestorable
 	})
 }
 
-// FR-P2-13. Cancelled is TestVerifyCancelled: run() cannot cancel its own signal ctx.
+// Exit codes for verify. Cancelled is TestVerifyCancelled: run() cannot cancel its own signal ctx.
 func TestVerifyExitCodes(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -325,7 +325,7 @@ func TestVerifyCancelled(t *testing.T) {
 	}
 }
 
-// NFR-4
+// A marker in the payload never reaches verify's output.
 func TestVerifyMarkerNeverReachesOutput(t *testing.T) {
 	setup := func(t *testing.T) (id, shards string, marker []byte) {
 		t.Helper()

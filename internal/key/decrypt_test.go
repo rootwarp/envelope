@@ -173,7 +173,7 @@ func TestSetDecryptI13OneIdentityPerCall(t *testing.T) {
 	}
 	for i, n := range lens {
 		if n != 1 {
-			t.Fatalf("age.Decrypt #%d got %d identities, want 1 (I-13)", i, n)
+			t.Fatalf("age.Decrypt #%d got %d identities, want 1", i, n)
 		}
 	}
 }
@@ -217,10 +217,10 @@ func TestI13ProductionDecryptNeverSpreadsIdentities(t *testing.T) {
 				return true
 			}
 			if call.Ellipsis != 0 {
-				t.Errorf("%s: age.Decrypt spread (I-13)", fset.Position(call.Pos()))
+				t.Errorf("%s: age.Decrypt spread", fset.Position(call.Pos()))
 			}
 			if len(call.Args) != 2 {
-				t.Errorf("%s: age.Decrypt has %d args, want reader + one identity (I-13)",
+				t.Errorf("%s: age.Decrypt has %d args, want reader + one identity",
 					fset.Position(call.Pos()), len(call.Args))
 			}
 			return true
@@ -638,10 +638,10 @@ func assertIdentitiesUnchanged(t *testing.T, before, after []*Identity) {
 	}
 	for i := range before {
 		if before[i] != after[i] {
-			t.Fatalf("Identities()[%d] pointer changed (I-12)", i)
+			t.Fatalf("Identities()[%d] pointer changed", i)
 		}
 		if before[i].Kind() != after[i].Kind() || before[i].Source() != after[i].Source() {
-			t.Fatalf("Identities()[%d] reordered (I-12)", i)
+			t.Fatalf("Identities()[%d] reordered", i)
 		}
 	}
 }

@@ -206,7 +206,7 @@ var splitCases = []struct {
 	{3, 5, 184},
 	{5, 8, 17}, // does not divide
 	{7, 10, 100},
-	{128, 256, 200}, // does not divide; FR-7 boundary
+	{128, 256, 200}, // does not divide; n at MaxShards
 }
 
 func TestSplitStripeLen(t *testing.T) {

@@ -22,8 +22,7 @@
 // Vendored because filippo.io/age/internal/bech32 is an internal package and age
 // exports no path to the X25519 scalar. This copy matches age's fork, which removed
 // BIP-173's 90-character length limit. Decoding the age identity encoding is a
-// dependency on the C2SP age specification, not on a Go API promise. See ADR-0005
-// and FR-32.
+// dependency on the C2SP age specification, not on a Go API promise.
 
 // Package bech32 is a modified version of the reference implementation of BIP173.
 package bech32

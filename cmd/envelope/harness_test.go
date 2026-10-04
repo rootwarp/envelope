@@ -11,7 +11,7 @@ import (
 )
 
 // TestMain is the package's only TestMain. OsExiter is set once here, never
-// from run, so a library os.Exit fails the suite with the code (FR-P2-03).
+// from run, so a library os.Exit fails the suite with the code.
 func TestMain(m *testing.M) {
 	if fakeplugin.Dispatch() {
 		return

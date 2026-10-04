@@ -227,7 +227,7 @@ func (id *Identity) ManifestMACKey() ([]byte, error) {
 	if !id.hasScalar {
 		return nil, ErrNoScalar
 	}
-	// FR-3: never sha256(identity.String()) — that hashes the Bech32 encoding, so a
+	// Never sha256(identity.String()) — that hashes the Bech32 encoding, so a
 	// format change silently rotates every MAC on files that must open in ten years.
 	// Never the raw scalar as an HMAC key — domain collision with its X25519 use.
 	return hkdf.Key(sha256.New, id.scalar[:], []byte(macSalt), macInfo, MACKeyLen)

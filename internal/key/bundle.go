@@ -42,7 +42,7 @@ const (
 // in this struct: Pin is the age ciphertext of the 32-byte seed, wrapped to
 // Recipients.
 //
-// One seed is minted per identity and is never regenerated (I-3). A silently
+// One seed is minted per identity and is never regenerated. A silently
 // new seed would be indistinguishable from every shard set having been forged.
 // Any copy of the bundle, of any age, must verify any shard set made with it.
 type Bundle struct {
@@ -71,7 +71,7 @@ func errNoRecipient() error {
 // wraps the seed to rs, and zeroes the seed before returning. It refuses an
 // empty recipient set: such a bundle could not split and envelope recipient
 // would have nothing to print. It takes no *Bundle: it can never mint a seed
-// on an existing bundle (I-3).
+// on an existing bundle.
 func NewBundle(identityLines []string, rs *RecipientSet) (*Bundle, error) {
 	if rs == nil || rs.Len() == 0 {
 		return nil, errNoRecipient()

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// FR-25 acceptance suite. Discoverable with:
+// Command-level acceptance cases. Discoverable with:
 //
 //	go test ./... -run TestAcceptance_
 //
@@ -120,13 +120,13 @@ func TestAcceptance_SplitNonEmptyOut(t *testing.T) {
 	}
 }
 
-// TestAcceptance_SIGINTMidRestore is FR-25 item 12.
+// TestAcceptance_SIGINTMidRestore covers a real SIGINT during restore.
 //
-// Contributing tests: TestContextCancelMidCopy (M5b.2, ctxReader cancel — the
-// primary cleanup-path gate, no signal) and TestSIGINTMidRestore (M6.2, a real
+// Contributing tests: TestContextCancelMidCopy (cancel during the copy, no
+// signal — the primary cleanup-path gate) and TestSIGINTMidRestore (a real
 // SIGINT to a child process). Two exist because the mechanism is cancellation
-// of the in-flight copy, already proved without a signal, while FR-34's AC
-// names a real SIGINT (plan R9). In-process run() cannot take a SIGINT without
+// of the in-flight copy, already proved without a signal, while the operator
+// contract is a real SIGINT. In-process run() cannot take a SIGINT without
 // signaling the test itself, so this named case uses the child-process path.
 func TestAcceptance_SIGINTMidRestore(t *testing.T) {
 	testSignalMidRestore(t, os.Interrupt)

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// FR-P2-11
+// completion bash, zsh, and fish each print a script and no home path.
 func TestCompletionScripts(t *testing.T) {
 	tmpPrefix := os.TempDir()
 	for _, shell := range []string{"bash", "zsh", "fish"} {
@@ -38,7 +38,7 @@ func TestCompletionScripts(t *testing.T) {
 	}
 }
 
-// FR-P2-11
+// Shell completion does not keygen, split, or restore.
 func TestCompletionNeverActs(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "identity.txt")
@@ -85,7 +85,7 @@ func TestCompletionNeverActs(t *testing.T) {
 	}
 }
 
-// FR-P2-11. Root completion reads os.Args, not Run's argv, so this is a
+// Root completion reads os.Args, not Run's argv, so this is a
 // stock-binary subprocess (buildEnvelope with no tags).
 func TestRootCompletion(t *testing.T) {
 	bin := buildEnvelope(t)

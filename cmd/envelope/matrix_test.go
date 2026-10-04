@@ -12,19 +12,17 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// Synthetic argv token for FR-P2-04: never a path, never a usage* substring.
+// Synthetic argv token: never a path, never a usage* substring, so a leak is obvious.
 const usageMark = "MARKERxyzzy"
 
 type usageRow struct {
 	name string
-	// fr is the primary FR-P2 ID this row pins.
-	fr   string
 	args []string
 	code int
-	// stdoutNonEmpty is true for explicit help and -version (FR-P2-05, FR-P2-06).
+	// stdoutNonEmpty is true for explicit help and -version.
 	stdoutNonEmpty bool
 	// contract is the usage* constant that must trail stderr on exit-2 rows.
-	// Empty skips the pin (M2-flip rows, and help -bogus).
+	// Empty skips that usage-suffix pin. exactStderr and reason are the other stderr pins.
 	contract string
 	// exactStderr, if set, is the entire stderr (ExitCode()==3).
 	exactStderr string
@@ -32,8 +30,8 @@ type usageRow struct {
 	reason string
 }
 
-// TestUsageMatrix is the P0 exit-0/exit-2 contract net (FR-P2-02, FR-P2-03,
-// FR-P2-04, FR-P2-05, FR-P2-06). Exit-1 rows are M1.6.
+// TestUsageMatrix pins exit 0 and exit 2 for flag syntax, missing flags,
+// unknown tokens, help, and version. Operational failures (exit 1) are elsewhere.
 func TestUsageMatrix(t *testing.T) {
 	dir := t.TempDir()
 	id := filepath.Join(dir, "id.txt")
@@ -46,104 +44,101 @@ func TestUsageMatrix(t *testing.T) {
 	}
 
 	rows := []usageRow{
-		{name: "bare", fr: "FR-P2-03", args: nil, code: exitUsage, contract: usageAll},
-		{name: "unknown cmd (marker)", fr: "FR-P2-04", args: []string{usageMark}, code: exitUsage, contract: usageAll},
-		// M2 flips these three to exit 0; pin only exit and empty stdout here.
-		{name: "help", fr: "FR-P2-03", args: []string{"help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "h", fr: "FR-P2-03", args: []string{"h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "help split", fr: "FR-P2-03", args: []string{"help", "split"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "help unknown (marker)", fr: "FR-P2-04", args: []string{"help", usageMark}, code: exitUsage, contract: usageAll},
-		{name: "help -bogus", fr: "FR-P2-03", args: []string{"help", "-bogus"}, code: exitUsage, reason: "flag provided but not defined: -bogus"},
-		{name: "help -h", fr: "FR-P2-05", args: []string{"help", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "help -h nope", fr: "FR-P2-05", args: []string{"help", "-h", "nope"}, code: exitUsage, exactStderr: usageAll},
-		{name: "h split", fr: "FR-P2-09", args: []string{"h", "split"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "-h unknown (marker)", fr: "FR-P2-05", args: []string{"-h", usageMark}, code: exitUsage, exactStderr: usageAll},
-		{name: "split -h unknown (marker)", fr: "FR-P2-05", args: []string{"split", "-h", usageMark}, code: exitUsage, exactStderr: usageAll},
+		{name: "bare", args: nil, code: exitUsage, contract: usageAll},
+		{name: "unknown cmd (marker)", args: []string{usageMark}, code: exitUsage, contract: usageAll},
+		// help, h, and help split exit 0 with help text and no contract pin.
+		{name: "help", args: []string{"help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "h", args: []string{"h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "help split", args: []string{"help", "split"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "help unknown (marker)", args: []string{"help", usageMark}, code: exitUsage, contract: usageAll},
+		{name: "help -bogus", args: []string{"help", "-bogus"}, code: exitUsage, reason: "flag provided but not defined: -bogus"},
+		{name: "help -h", args: []string{"help", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "help -h nope", args: []string{"help", "-h", "nope"}, code: exitUsage, exactStderr: usageAll},
+		{name: "h split", args: []string{"h", "split"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "-h unknown (marker)", args: []string{"-h", usageMark}, code: exitUsage, exactStderr: usageAll},
+		{name: "split -h unknown (marker)", args: []string{"split", "-h", usageMark}, code: exitUsage, exactStderr: usageAll},
 
-		{name: "-h", fr: "FR-P2-05", args: []string{"-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "-help", fr: "FR-P2-05", args: []string{"-help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "--help", fr: "FR-P2-05", args: []string{"--help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "keygen -h", fr: "FR-P2-05", args: []string{"keygen", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "keygen -help", fr: "FR-P2-05", args: []string{"keygen", "-help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "keygen --help", fr: "FR-P2-05", args: []string{"keygen", "--help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "split -h", fr: "FR-P2-05", args: []string{"split", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "split -help", fr: "FR-P2-05", args: []string{"split", "-help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "split --help", fr: "FR-P2-05", args: []string{"split", "--help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "restore -h", fr: "FR-P2-05", args: []string{"restore", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "restore -help", fr: "FR-P2-05", args: []string{"restore", "-help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "restore --help", fr: "FR-P2-05", args: []string{"restore", "--help"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "recipient -h", fr: "FR-P2-05", args: []string{"recipient", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "verify -h", fr: "FR-P2-05", args: []string{"verify", "-h"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "bind -h", fr: "FR-P2-05", args: []string{"bind", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "-h", args: []string{"-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "-help", args: []string{"-help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "--help", args: []string{"--help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "keygen -h", args: []string{"keygen", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "keygen -help", args: []string{"keygen", "-help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "keygen --help", args: []string{"keygen", "--help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "split -h", args: []string{"split", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "split -help", args: []string{"split", "-help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "split --help", args: []string{"split", "--help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "restore -h", args: []string{"restore", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "restore -help", args: []string{"restore", "-help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "restore --help", args: []string{"restore", "--help"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "recipient -h", args: []string{"recipient", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "verify -h", args: []string{"verify", "-h"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "bind -h", args: []string{"bind", "-h"}, code: exitOK, stdoutNonEmpty: true},
 
-		{name: "-version", fr: "FR-P2-06", args: []string{"-version"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "--version", fr: "FR-P2-06", args: []string{"--version"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "-version split", fr: "FR-P2-06", args: []string{"-version", "split"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "-version -bogus", fr: "FR-P2-06", args: []string{"-version", "-bogus"}, code: exitOK, stdoutNonEmpty: true},
-		{name: "--version=true", fr: "FR-P2-06", args: []string{"--version=true"}, code: exitUsage, contract: usageAll},
-		{name: "-v", fr: "FR-P2-06", args: []string{"-v"}, code: exitUsage, contract: usageAll},
-		{name: "version", fr: "FR-P2-06", args: []string{"version"}, code: exitUsage, contract: usageAll},
-		{name: "split -version", fr: "FR-P2-06", args: []string{"split", "-version"}, code: exitUsage, contract: usageSplit},
+		{name: "-version", args: []string{"-version"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "--version", args: []string{"--version"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "-version split", args: []string{"-version", "split"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "-version -bogus", args: []string{"-version", "-bogus"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "--version=true", args: []string{"--version=true"}, code: exitUsage, contract: usageAll},
+		{name: "-v", args: []string{"-v"}, code: exitUsage, contract: usageAll},
+		{name: "version", args: []string{"version"}, code: exitUsage, contract: usageAll},
+		{name: "split -version", args: []string{"split", "-version"}, code: exitUsage, contract: usageSplit},
 
-		{name: "spl", fr: "FR-P2-02", args: []string{"spl"}, code: exitUsage, contract: usageAll},
-		{name: "root -bogus", fr: "FR-P2-03", args: []string{"-bogus"}, code: exitUsage, contract: usageAll},
-		{name: "keygen -bogus", fr: "FR-P2-03", args: []string{"keygen", "-bogus"}, code: exitUsage, contract: usageKeygen},
-		// pin-sensitive (research/01 §2)
-		{name: "keygen -h -bogus", fr: "FR-P2-05", args: []string{"keygen", "-h", "-bogus"}, code: exitOK, stdoutNonEmpty: true},
-		// pin-sensitive (research/01 §2)
-		{name: "keygen -bogus -h", fr: "FR-P2-05", args: []string{"keygen", "-bogus", "-h"}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen missing", fr: "FR-P2-03", args: []string{"keygen"}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen -out=", fr: "FR-P2-02", args: []string{"keygen", "-out="}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen -out ''", fr: "FR-P2-02", args: []string{"keygen", "-out", ""}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen -out (missing value)", fr: "FR-P2-03", args: []string{"keygen", "-out"}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen stray (marker)", fr: "FR-P2-04", args: []string{"keygen", "-out", filepath.Join(dir, "stray"), usageMark}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen -out x extra", fr: "FR-P2-02", args: []string{"keygen", "-out", filepath.Join(dir, "extra"), "extra"}, code: exitUsage, contract: usageKeygen},
-		{name: "keygen help positional", fr: "FR-P2-02", args: []string{"keygen", "-out", filepath.Join(dir, "helppos"), "help"}, code: exitUsage, contract: usageKeygen},
+		{name: "spl", args: []string{"spl"}, code: exitUsage, contract: usageAll},
+		{name: "root -bogus", args: []string{"-bogus"}, code: exitUsage, contract: usageAll},
+		{name: "keygen -bogus", args: []string{"keygen", "-bogus"}, code: exitUsage, contract: usageKeygen},
+		// -h before an unknown flag still prints help.
+		{name: "keygen -h -bogus", args: []string{"keygen", "-h", "-bogus"}, code: exitOK, stdoutNonEmpty: true},
+		// An unknown flag before -h is usage; help is not reached.
+		{name: "keygen -bogus -h", args: []string{"keygen", "-bogus", "-h"}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen missing", args: []string{"keygen"}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen -out=", args: []string{"keygen", "-out="}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen -out ''", args: []string{"keygen", "-out", ""}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen -out (missing value)", args: []string{"keygen", "-out"}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen stray (marker)", args: []string{"keygen", "-out", filepath.Join(dir, "stray"), usageMark}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen -out x extra", args: []string{"keygen", "-out", filepath.Join(dir, "extra"), "extra"}, code: exitUsage, contract: usageKeygen},
+		{name: "keygen help positional", args: []string{"keygen", "-out", filepath.Join(dir, "helppos"), "help"}, code: exitUsage, contract: usageKeygen},
 
-		{name: "split missing all", fr: "FR-P2-03", args: []string{"split"}, code: exitUsage, contract: usageSplit},
-		{name: "split -k -1", fr: "FR-P2-02", args: sp("-k", "-1"), code: exitUsage, contract: usageSplit},
-		{name: "split -k 1.5", fr: "FR-P2-03", args: sp("-k", "1.5"), code: exitUsage, contract: usageSplit},
-		{name: "split -k abc", fr: "FR-P2-03", args: sp("-k", "abc"), code: exitUsage, contract: usageSplit},
-		{name: "split -k 0", fr: "FR-P2-03", args: sp("-k", "0"), code: exitUsage, contract: usageSplit},
-		{name: "split -n 2 -k 3", fr: "FR-P2-03", args: sp("-n", "2", "-k", "3"), code: exitUsage, contract: usageSplit},
-		{name: "split -n 3 -k 3", fr: "FR-P2-03", args: sp("-n", "3", "-k", "3"), code: exitUsage, contract: usageSplit},
-		{name: "split -n 257", fr: "FR-P2-03", args: sp("-n", "257"), code: exitUsage, contract: usageSplit},
-		{name: "split -kn 3", fr: "FR-P2-02", args: sp("-kn", "3"), code: exitUsage, contract: usageSplit},
-		{name: "split -identity ''", fr: "FR-P2-02", args: []string{"split", "-identity", "", "-in", in, "-out", filepath.Join(t.TempDir(), "s")}, code: exitUsage, contract: usageSplit},
-		{name: "split -- -identity x", fr: "FR-P2-02", args: []string{"split", "--", "-identity", "x"}, code: exitUsage, contract: usageSplit},
-		{name: "split -- tail (marker)", fr: "FR-P2-04", args: sp("--", usageMark), code: exitUsage, contract: usageSplit},
-		{name: "split leading positional (marker)", fr: "FR-P2-04", args: append([]string{"split", usageMark}, sp()[1:]...), code: exitUsage, contract: usageSplit},
-		{name: "split h positional", fr: "FR-P2-02", args: sp("h"), code: exitUsage, contract: usageSplit},
+		{name: "split missing all", args: []string{"split"}, code: exitUsage, contract: usageSplit},
+		{name: "split -k -1", args: sp("-k", "-1"), code: exitUsage, contract: usageSplit},
+		{name: "split -k 1.5", args: sp("-k", "1.5"), code: exitUsage, contract: usageSplit},
+		{name: "split -k abc", args: sp("-k", "abc"), code: exitUsage, contract: usageSplit},
+		{name: "split -k 0", args: sp("-k", "0"), code: exitUsage, contract: usageSplit},
+		{name: "split -n 2 -k 3", args: sp("-n", "2", "-k", "3"), code: exitUsage, contract: usageSplit},
+		{name: "split -n 3 -k 3", args: sp("-n", "3", "-k", "3"), code: exitUsage, contract: usageSplit},
+		{name: "split -n 257", args: sp("-n", "257"), code: exitUsage, contract: usageSplit},
+		{name: "split -kn 3", args: sp("-kn", "3"), code: exitUsage, contract: usageSplit},
+		{name: "split -identity ''", args: []string{"split", "-identity", "", "-in", in, "-out", filepath.Join(t.TempDir(), "s")}, code: exitUsage, contract: usageSplit},
+		{name: "split -- -identity x", args: []string{"split", "--", "-identity", "x"}, code: exitUsage, contract: usageSplit},
+		{name: "split -- tail (marker)", args: sp("--", usageMark), code: exitUsage, contract: usageSplit},
+		{name: "split leading positional (marker)", args: append([]string{"split", usageMark}, sp()[1:]...), code: exitUsage, contract: usageSplit},
+		{name: "split h positional", args: sp("h"), code: exitUsage, contract: usageSplit},
 
-		{name: "recipient missing", fr: "FR-P2-03", args: []string{"recipient"}, code: exitUsage, contract: usageRecipient},
-		{name: "recipient -identity=", fr: "FR-P2-02", args: []string{"recipient", "-identity="}, code: exitUsage, contract: usageRecipient},
-		{name: "recipient stray (marker)", fr: "FR-P2-04", args: []string{"recipient", "-identity", id, usageMark}, code: exitUsage, contract: usageRecipient},
-		{name: "recipient -identity id -k 3", fr: "FR-P2-03", args: []string{"recipient", "-identity", id, "-k", "3"}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient missing", args: []string{"recipient"}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient -identity=", args: []string{"recipient", "-identity="}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient stray (marker)", args: []string{"recipient", "-identity", id, usageMark}, code: exitUsage, contract: usageRecipient},
+		{name: "recipient -identity id -k 3", args: []string{"recipient", "-identity", id, "-k", "3"}, code: exitUsage, contract: usageRecipient},
 
-		{name: "bind missing", fr: "FR-P2-03", args: []string{"bind"}, code: exitUsage, contract: usageBind},
-		{name: "bind stray (marker)", fr: "FR-P2-04", args: []string{"bind", usageMark}, code: exitUsage, contract: usageBind},
-		{name: "verify missing", fr: "FR-P2-03", args: []string{"verify"}, code: exitUsage, contract: usageVerify, reason: `"identity, in"`},
-		{name: "verify -k 3", fr: "FR-P2-03", args: []string{"verify", "-identity", id, "-in", dir, "-k", "3"}, code: exitUsage, contract: usageVerify},
-		{name: "verify -out o", fr: "FR-P2-03", args: []string{"verify", "-identity", id, "-in", dir, "-out", "o"}, code: exitUsage, contract: usageVerify},
-		{name: "verify stray (marker)", fr: "FR-P2-04", args: []string{"verify", "-identity", id, "-in", dir, usageMark}, code: exitUsage, contract: usageVerify},
+		{name: "bind missing", args: []string{"bind"}, code: exitUsage, contract: usageBind},
+		{name: "bind stray (marker)", args: []string{"bind", usageMark}, code: exitUsage, contract: usageBind},
+		{name: "verify missing", args: []string{"verify"}, code: exitUsage, contract: usageVerify, reason: `"identity, in"`},
+		{name: "verify -k 3", args: []string{"verify", "-identity", id, "-in", dir, "-k", "3"}, code: exitUsage, contract: usageVerify},
+		{name: "verify -out o", args: []string{"verify", "-identity", id, "-in", dir, "-out", "o"}, code: exitUsage, contract: usageVerify},
+		{name: "verify stray (marker)", args: []string{"verify", "-identity", id, "-in", dir, usageMark}, code: exitUsage, contract: usageVerify},
 
-		{name: "split -k=4 -n=6", fr: "FR-P2-02", args: sp("-k=4", "-n=6"), code: exitOK},
-		{name: "split --k 4 --n 6", fr: "FR-P2-02", args: sp("--k", "4", "--n", "6"), code: exitOK},
-		{name: "split --k=4 --n=6", fr: "FR-P2-02", args: sp("--k=4", "--n=6"), code: exitOK},
-		{name: "split -k 4 -k 2 (last wins)", fr: "FR-P2-02", args: sp("-k", "4", "-k", "2"), code: exitOK},
+		{name: "split -k=4 -n=6", args: sp("-k=4", "-n=6"), code: exitOK},
+		{name: "split --k 4 --n 6", args: sp("--k", "4", "--n", "6"), code: exitOK},
+		{name: "split --k=4 --n=6", args: sp("--k=4", "--n=6"), code: exitOK},
+		{name: "split -k 4 -k 2 (last wins)", args: sp("-k", "4", "-k", "2"), code: exitOK},
 
-		{name: "completion", fr: "FR-P2-11", args: []string{"completion"}, code: exitUsage, contract: usageCompletion},
-		{name: "completion MARK", fr: "FR-P2-11", args: []string{"completion", usageMark}, code: exitUsage, contract: usageCompletion},
-		{name: "completion bash extra", fr: "FR-P2-11", args: []string{"completion", "bash", "extra"}, code: exitUsage, contract: usageCompletion},
-		{name: "completion bash -bogus", fr: "FR-P2-11", args: []string{"completion", "bash", "-bogus"}, code: exitUsage, contract: usageCompletion},
-		{name: "completion bash", fr: "FR-P2-11", args: []string{"completion", "bash"}, code: exitOK, stdoutNonEmpty: true},
+		{name: "completion", args: []string{"completion"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion MARK", args: []string{"completion", usageMark}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash extra", args: []string{"completion", "bash", "extra"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash -bogus", args: []string{"completion", "bash", "-bogus"}, code: exitUsage, contract: usageCompletion},
+		{name: "completion bash", args: []string{"completion", "bash"}, code: exitOK, stdoutNonEmpty: true},
 	}
 
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
-			if r.fr == "" {
-				t.Fatal("row missing FR-P2 ID")
-			}
 			var stdout, stderr bytes.Buffer
 			code := run(r.args, &stdout, &stderr)
 			out, errStr := stdout.String(), stderr.String()
@@ -208,12 +203,12 @@ type cmdNode struct {
 }
 
 // TestEveryCommandHasHooks walks Commands (never VisibleCommands) so a later
-// command that drops the hook, noArgs, or HideHelpCommand fails here (FR-P2-03).
+// command that drops the hook, noArgs, or HideHelpCommand fails here.
 func TestEveryCommandHasHooks(t *testing.T) {
 	root := newApp(io.Discard, io.Discard)
 	// Pre-Run: HideHelpCommand is inherited from the root after setup, so a
 	// child-only drop would pass the behavioral probes. Pin the field on the
-	// envelope-built tree before Run appends library commands (M2 completion).
+	// envelope-built tree before Run appends library commands such as completion.
 	preNames := map[string]bool{}
 	var assertHideHelpCommand func([]*cli.Command)
 	assertHideHelpCommand = func(cmds []*cli.Command) {

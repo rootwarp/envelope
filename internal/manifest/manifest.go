@@ -1,9 +1,11 @@
 // Package manifest is a pure format package: fields, macInput, HMAC,
 // version dispatch, and no internal imports (D4).
 //
-// Version 1 is scalar-HKDF, read-only forever, and still what a bare file
-// identity writes. Version 2 (VersionPin) means exactly pin-authenticated:
-// MACSourceScalar is not a legal v2 source.
+// Version 1 is scalar-HKDF and a frozen format: no field is ever added or
+// reinterpreted, an existing v1 manifest is never rewritten, and split still
+// writes v1 fresh for a bare file identity with no -recipient. Version 2
+// (VersionPin) means exactly pin-authenticated: MACSourceScalar is not a
+// legal v2 source.
 //
 // v1 macInput: version(u32) ‖ k(u32) ‖ n(u32) ‖ ciphertext_len(u64) ‖
 // stripe_len(u64) ‖ digests(32·n)
@@ -24,7 +26,10 @@ import (
 )
 
 const (
-	Version    uint32 = 1 // scalar-HKDF; read-only forever
+	// Version is scalar-HKDF and a frozen format: no field is ever added or
+	// reinterpreted, an existing v1 manifest is never rewritten, and split
+	// still writes v1 fresh for a bare file identity with no -recipient.
+	Version    uint32 = 1
 	VersionPin uint32 = 2 // pin-authenticated, and nothing else
 )
 
@@ -105,7 +110,8 @@ func Seal(m *Manifest, macKey []byte, s Sealer) ([]byte, error) {
 	return s.EncryptBytes(body)
 }
 
-// Open decrypts blob and verifies it in architecture §5 order.
+// Open decrypts the blob, then checks version, shape, key id, MAC, and
+// internal consistency, in that order.
 // Each step is reached only if every earlier one passed. It returns a
 // *Manifest only when every check passed.
 func Open(blob []byte, src MACKeySource, op Opener) (*Manifest, error) {
@@ -114,7 +120,7 @@ func Open(blob []byte, src MACKeySource, op Opener) (*Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	// Unknown keys must be inert (FR-11): extra JSON keys are dropped, not rejected.
+	// Unknown keys must be inert: extra JSON keys are dropped, not rejected.
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, err
 	}

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	MaxShards = 256 // FR-7: above this, New silently selects Leopard
+	MaxShards = 256 // above this, New silently selects Leopard
 	DigestLen = 32
 )
 
@@ -39,7 +39,7 @@ var (
 	ErrOutSizeRange       = errors.New("join outSize must be non-negative and fit in int")
 )
 
-// Validate applies FR-7's rules with no allocation, so the CLI can reject bad
+// Validate applies the shard-count bounds with no allocation, so the CLI can reject bad
 // (k, n) before touching the filesystem.
 func Validate(k, n int) error {
 	if k < 1 {
@@ -56,7 +56,7 @@ func Validate(k, n int) error {
 
 // New validates, constructs with no options, and asserts ShardSizeMultiple()==1.
 // It branches on err: the Leopard constructor returns a non-nil interface
-// wrapping a typed nil, and calling a method on it panics. FR-6, FR-7.
+// wrapping a typed nil, and calling a method on it panics.
 func New(k, n int) (*Encoder, error) {
 	if err := Validate(k, n); err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (e *Encoder) N() int { return e.n }
 
 // Split stripes ciphertext into n shards and returns stripeLen == ceil(len/k).
 // It rejects int64(len(ciphertext)) < int64(e.k) with ErrCiphertextTooShort
-// rather than passing it to the library, whose ErrShortData is ambiguous. FR-9.
+// rather than passing it to the library, whose ErrShortData is ambiguous.
 //
 // Data shards alias ciphertext. The caller must not mutate ciphertext until
 // the shards are consumed; Split does not copy.
@@ -106,7 +106,7 @@ func (e *Encoder) Split(ciphertext []byte) ([][]byte, int64, error) {
 }
 
 // NewDigest returns a SHA-256 hasher for one shard. Pipeline composes it with
-// io.MultiWriter so hashing on write costs no extra I/O. FR-8.
+// io.MultiWriter so hashing on write costs no extra I/O.
 func NewDigest() hash.Hash {
 	return sha256.New()
 }
@@ -118,7 +118,7 @@ func Digest(shard []byte) []byte {
 }
 
 // Reconstruct asserts len(shards) == n, counts usable shards itself, and
-// returns *TooFewShardsError below k before calling the library. FR-15, FR-16.
+// returns *TooFewShardsError below k before calling the library.
 // It uses ReconstructData (data shards only); the library Reconstruct rebuilds
 // parity that Join never reads.
 func (e *Encoder) Reconstruct(shards [][]byte) error {
@@ -141,7 +141,7 @@ func (e *Encoder) Reconstruct(shards [][]byte) error {
 
 // Join narrows outSize to int with an explicit range check and calls the
 // library's Join, which reads only shards[:k]. A data shard with len==0
-// (Erase or absent) fails closed: Reconstruct must run first. FR-17.
+// (Erase or absent) fails closed: Reconstruct must run first.
 func (e *Encoder) Join(dst io.Writer, shards [][]byte, outSize int64) error {
 	if outSize < 0 || outSize > int64(math.MaxInt) {
 		return ErrOutSizeRange
@@ -173,14 +173,14 @@ func (e *Encoder) Join(dst io.Writer, shards [][]byte, outSize int64) error {
 // Erase marks index i as an erasure. A present-but-corrupt shard is truncated
 // to shards[i][:0], donating its buffer back to the reconstructor; an absent
 // shard has no buffer and stays nil. Both are len == 0, which is what the
-// library reads. FR-14.
+// library reads.
 func Erase(shards [][]byte, i int) {
 	if shards[i] != nil {
 		shards[i] = shards[i][:0]
 	}
 }
 
-// Usable counts entries with len > 0. nil and [:0] are identical. FR-16.
+// Usable counts entries with len > 0. nil and [:0] are identical.
 func Usable(shards [][]byte) int {
 	n := 0
 	for _, s := range shards {
@@ -191,8 +191,8 @@ func Usable(shards [][]byte) int {
 	return n
 }
 
-// TooFewShardsError is a type, not a sentinel: FR-26 needs the two counts in
-// the message, and pipeline branches on Have == 0 for the stale-manifest
+// TooFewShardsError is a type, not a sentinel: the message carries the two
+// counts, and pipeline branches on Have == 0 for the stale-manifest
 // diagnosis.
 type TooFewShardsError struct{ Need, Have int }
 

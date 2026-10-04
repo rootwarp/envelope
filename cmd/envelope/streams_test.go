@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// FR-P2-04
+// Each failure is printed once on stderr and not on stdout.
 func TestErrorPrintedOnce(t *testing.T) {
 	tests := []struct {
 		name string
@@ -188,7 +188,7 @@ func TestErrorPrintedOnce(t *testing.T) {
 	})
 }
 
-// NFR-3
+// A subprocess and in-process run() agree on stdout, stderr, and exit.
 func TestSubprocessStreamsMatchRun(t *testing.T) {
 	bin := buildEnvelope(t)
 	cases := []struct {
@@ -271,7 +271,7 @@ func mustSplitFixture(t *testing.T) (id, shards, out string) {
 }
 
 // childEnv copies the process environment without library debug switches
-// that write around injected writers (O19). PATH is kept so an injected
+// that write around injected writers. PATH is kept so an injected
 // fake-plugin directory reaches an exec'd child.
 func childEnv() []string {
 	src := os.Environ()
