@@ -168,6 +168,21 @@ func TestSplitInvalidKNLeavesNothing(t *testing.T) {
 	}
 }
 
+func TestSplitMissingIdentityIsOpen(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.txt")
+	_, openErr := os.Open(missing)
+	_, err := Split(context.Background(), SplitOptions{
+		IdentityPath: missing,
+		InPath:       filepath.Join(t.TempDir(), "in.bin"),
+		OutDir:       filepath.Join(t.TempDir(), "out"),
+		K:            3,
+		N:            5,
+	}, io.Discard)
+	if err == nil || openErr == nil || err.Error() != openErr.Error() {
+		t.Fatalf("Split %v, open %v", err, openErr)
+	}
+}
+
 func TestSplitRejectsBadIdentity(t *testing.T) {
 	tests := []struct {
 		name  string

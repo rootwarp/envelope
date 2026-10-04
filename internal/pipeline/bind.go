@@ -1,14 +1,10 @@
 package pipeline
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
 	"io"
-	"os"
-	"strings"
 
 	"github.com/rootwarp/envelope/internal/key"
 )
@@ -93,7 +89,14 @@ func bindCreate(ctx context.Context, opts BindOptions) (*BindReport, error) {
 }
 
 func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error) {
-	b, err := key.ReadBundle(opts.BundlePath)
+	// One read. Stat stays first so a missing bundle still reports "stat …",
+	// and the pin unwrap cannot observe a file that replaced this one.
+	f, err := key.ReadBundleFile(opts.BundlePath)
+	defer f.Zero()
+	if err != nil {
+		return nil, err
+	}
+	b, err := f.Bundle()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +115,7 @@ func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error
 	}
 
 	src := terminalSource(opts.Terminal)
-	set, err := key.LoadSet([]string{opts.BundlePath}, src, key.WithContext(ctx))
+	set, err := key.LoadFiles([]*key.IdentityFile{f}, src, key.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -178,21 +181,10 @@ func readIdentityLines(paths []string) ([]string, error) {
 }
 
 func identityLinesFromFile(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	f, err := key.ReadIdentityFile(path)
+	defer f.Zero()
 	if err != nil {
 		return nil, err
 	}
-	var lines []string
-	sc := bufio.NewScanner(bytes.NewReader(data))
-	for sc.Scan() {
-		line := strings.TrimRight(sc.Text(), "\r")
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		lines = append(lines, line)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return lines, nil
+	return f.Lines()
 }

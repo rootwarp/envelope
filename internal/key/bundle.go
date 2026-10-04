@@ -192,6 +192,18 @@ func (b *Bundle) Marshal() []byte {
 // ≤ 64 KiB. Unknown envelope- fields are refused so a future load-bearing
 // field cannot be silently dropped.
 func ReadBundle(path string) (*Bundle, error) {
+	f, err := ReadBundleFile(path)
+	defer f.Zero()
+	if err != nil {
+		return nil, err
+	}
+	return f.Bundle()
+}
+
+// ReadBundleFile is the read behind ReadBundle. Stat runs first, so a missing
+// path still reports "stat …", and a file over the 64 KiB bundle cap is
+// refused before any read. The caller must Zero the file.
+func ReadBundleFile(path string) (*IdentityFile, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -199,16 +211,7 @@ func ReadBundle(path string) (*Bundle, error) {
 	if fi.Size() > bundleMaxBytes {
 		return nil, ErrBundleTooLarge
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	b, err := parseBundle(data)
-	if err != nil {
-		return nil, err
-	}
-	b.Path = path
-	return b, nil
+	return ReadIdentityFile(path)
 }
 
 // WriteNew is keygen's durability sequence: O_EXCL 0600, write, Sync, Close,

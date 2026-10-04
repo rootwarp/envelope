@@ -144,26 +144,12 @@ var testFailWriteNew func() error
 // Load parses path with age.ParseIdentities and rejects anything that is not
 // exactly one *age.X25519Identity, then recovers the scalar.
 func Load(path string) (*Identity, error) {
-	data, err := os.ReadFile(path)
+	f, err := ReadIdentityFile(path)
+	defer f.Zero()
 	if err != nil {
 		return nil, err
 	}
-	ids, err := age.ParseIdentities(bytes.NewReader(data))
-	if err != nil {
-		if nonCommentLines(data) == 0 {
-			return nil, ErrNotSingleIdentity
-		}
-		// age quotes the identity line; never return or wrap that error.
-		return nil, ErrInvalidIdentity
-	}
-	if len(ids) != 1 {
-		return nil, ErrNotSingleIdentity
-	}
-	x25519, ok := ids[0].(*age.X25519Identity)
-	if !ok {
-		return nil, ErrNotX25519
-	}
-	return newIdentity(x25519)
+	return f.Single()
 }
 
 func (id *Identity) RecipientString() (string, error) {

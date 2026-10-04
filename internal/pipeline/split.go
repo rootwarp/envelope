@@ -55,8 +55,15 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	}
 	captureTestContext(ctx)
 
+	// One read for this path. v1's MAC identity is the scalar parsed into the
+	// set; a second Load would hold another copy of it.
+	f, err := key.ReadIdentityFile(opts.IdentityPath)
+	defer f.Zero()
+	if err != nil {
+		return nil, err
+	}
 	src := terminalSource(opts.Terminal)
-	set, err := key.LoadSet([]string{opts.IdentityPath}, src, key.WithContext(ctx))
+	set, err := key.LoadFiles([]*key.IdentityFile{f}, src, key.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +73,6 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	}
 
 	// One invocation-level boolean, decided before -in or -out is touched.
-	// v1 keeps Load + ManifestMACKey so Phase 1 error identity is construction.
 	v1 := set.BareFileIdentity() && len(opts.Recipients) == 0
 
 	var (
@@ -75,20 +81,14 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		rs       *key.RecipientSet
 	)
 	if v1 {
-		id, err := key.Load(opts.IdentityPath)
-		if err != nil {
-			return nil, err
-		}
+		id := set.Identities()[0]
 		macKey, err = id.ManifestMACKey()
 		if err != nil {
-			id.Zero()
 			return nil, err
 		}
 		defer func() {
 			// Best-effort: hkdf.Key returns a fresh slice the GC may already have copied.
 			clear(macKey)
-			// Best-effort: cannot scrub copies already made by hkdf.Key or the GC.
-			id.Zero()
 		}()
 		rs, err = key.NewRecipientSet(id)
 		if err != nil {
@@ -100,11 +100,13 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 			recStrs = set.RecordedRecipients()
 		}
 		if len(recStrs) == 0 {
-			// Non-bundle file identities that are not BareFileIdentity keep
-			// key.Load's Phase 1 sentinels (two identities, hybrid, …).
-			if _, err := key.Load(opts.IdentityPath); err != nil {
+			// LoadSet accepts files Load rejects (two identities, a hybrid, …).
+			// Single is Load's parser, so those sentinels stay Load's.
+			id, err := f.Single()
+			if err != nil {
 				return nil, err
 			}
+			id.Zero()
 			return nil, key.ErrNoPin
 		}
 		ui := key.NewClientUI(src)

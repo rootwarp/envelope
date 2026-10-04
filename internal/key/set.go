@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,31 +73,60 @@ func (s *Set) ctxErr() error {
 	return s.ctx.Err()
 }
 
-// LoadSet reads each path, routing AGE-PLUGIN- lines to plugin.NewIdentity and
-// the remainder to age.ParseIdentities in one call so its diagnostics stay
+// LoadSet reads each path once, routing AGE-PLUGIN- lines to plugin.NewIdentity
+// and the remainder to age.ParseIdentities in one call so its diagnostics stay
 // intact. plugin.NewIdentity starts no process. A path whose first non-empty
 // line is the bundle header is parsed as a bundle: LoadSet records that
 // bundle's mac_key_id, recipients and pin ciphertext (card-free) and does
 // not unwrap the pin.
 func LoadSet(paths []string, term TerminalSource, opts ...SetOption) (*Set, error) {
+	// Parse each path before opening the next. A later open failure must
+	// not replace an earlier parse failure.
+	s := prepareSet(term, len(paths), opts...)
+	var natives, plugins []*Identity
+	for _, path := range paths {
+		f, err := ReadIdentityFile(path)
+		defer f.Zero()
+		if err != nil {
+			zeroIdentities(natives, plugins)
+			return nil, err
+		}
+		natives, plugins, err = s.takeFile(f, natives, plugins)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.finish(natives, plugins)
+}
+
+func prepareSet(term TerminalSource, nPaths int, opts ...SetOption) *Set {
 	s := &Set{
 		term:   term,
 		ui:     NewClientUI(term),
-		nPaths: len(paths),
+		nPaths: nPaths,
 		ctx:    context.Background(),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
-	var natives, plugins []*Identity
-	for _, path := range paths {
-		n, p, err := s.loadPath(path)
-		if err != nil {
-			return nil, err
-		}
-		natives = append(natives, n...)
-		plugins = append(plugins, p...)
+	return s
+}
+
+func (s *Set) takeFile(f *IdentityFile, natives, plugins []*Identity) ([]*Identity, []*Identity, error) {
+	if f == nil {
+		zeroIdentities(natives, plugins)
+		return nil, nil, ErrInvalidIdentity
 	}
+	n, p, err := s.loadFile(f)
+	if err != nil {
+		// This Set is not returned, so nothing else will Zero these scalars.
+		zeroIdentities(natives, plugins)
+		return nil, nil, err
+	}
+	return append(natives, n...), append(plugins, p...), nil
+}
+
+func (s *Set) finish(natives, plugins []*Identity) (*Set, error) {
 	s.ids = append(natives, plugins...)
 	if len(s.ids) == 0 {
 		return nil, ErrNotSingleIdentity
@@ -106,22 +134,17 @@ func LoadSet(paths []string, term TerminalSource, opts ...SetOption) (*Set, erro
 	return s, nil
 }
 
-func (s *Set) loadPath(path string) (natives, plugins []*Identity, err error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	if isBundle(data) {
+func (s *Set) loadFile(f *IdentityFile) (natives, plugins []*Identity, err error) {
+	if f.IsBundle() {
 		s.bundle = true
-		b, err := parseBundle(data)
+		b, err := f.Bundle()
 		if err != nil {
 			return nil, nil, err
 		}
-		b.Path = path
 		s.recordPin(b)
-		return s.parseIdentityLines(path, b.Identities)
+		return s.parseIdentityLines(f.Path, b.Identities)
 	}
-	return s.parseIdentityData(path, data)
+	return s.parseIdentityData(f.Path, f.data)
 }
 
 func (s *Set) parseIdentityLines(path string, lines []string) (natives, plugins []*Identity, err error) {

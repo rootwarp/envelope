@@ -116,6 +116,22 @@ func TestRecipientIncompleteBundle(t *testing.T) {
 	}
 }
 
+func TestRecipientErrorText(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.txt")
+	_, openErr := os.Open(missing)
+	_, err := Recipient(RecipientOptions{IdentityPath: missing})
+	if err == nil || openErr == nil || err.Error() != openErr.Error() {
+		t.Fatalf("Recipient %v, open %v", err, openErr)
+	}
+
+	dir := t.TempDir()
+	_, readErr := os.ReadFile(dir)
+	_, err = Recipient(RecipientOptions{IdentityPath: dir})
+	if err == nil || readErr == nil || err.Error() != readErr.Error() {
+		t.Fatalf("Recipient dir %v, read %v", err, readErr)
+	}
+}
+
 func TestRecipientNoStringerAssertion(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

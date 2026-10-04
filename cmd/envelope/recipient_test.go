@@ -146,6 +146,33 @@ func TestRecipientNeverLeaks(t *testing.T) {
 	}
 }
 
+func TestRecipientRefusesOversizedIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.txt")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(1 << 30); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"recipient", "-identity", path}, &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit = %d, want %d (stderr len=%d)", code, exitFailure, stderr.Len())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout has %d bytes, want 0", stdout.Len())
+	}
+	if !strings.Contains(stderr.String(), key.ErrIdentityTooLarge.Error()) {
+		t.Fatalf("stderr missing %q (len=%d)", key.ErrIdentityTooLarge.Error(), stderr.Len())
+	}
+}
+
 // recipient does not modify the identity file.
 func TestRecipientLeavesIdentity(t *testing.T) {
 	dir := t.TempDir()

@@ -3,7 +3,6 @@ package pipeline
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/rootwarp/envelope/internal/key"
 )
@@ -26,19 +25,20 @@ func errNoLocalRecipient() error {
 // The stub carries no public key, so a bundle's recorded set is the only
 // local source; a bare plugin identity must not be asked for a recipient.
 func Recipient(opts RecipientOptions) ([]string, error) {
-	data, err := os.ReadFile(opts.IdentityPath)
+	f, err := key.ReadIdentityFile(opts.IdentityPath)
+	defer f.Zero()
 	if err != nil {
 		return nil, err
 	}
-	if key.IsBundle(data) {
-		b, err := key.ReadBundle(opts.IdentityPath)
+	if f.IsBundle() {
+		b, err := f.Bundle()
 		if err != nil {
 			return nil, err
 		}
 		return append([]string(nil), b.Recipients...), nil
 	}
 
-	id, err := key.Load(opts.IdentityPath)
+	id, err := f.Single()
 	if err == nil {
 		defer id.Zero()
 		s, err := id.RecipientString()
@@ -51,9 +51,10 @@ func Recipient(opts RecipientOptions) ([]string, error) {
 		return nil, err
 	}
 
-	// Load rejects AGE-PLUGIN- lines as invalid; LoadSet parses them without
-	// starting a plugin process.
-	set, lerr := key.LoadSet([]string{opts.IdentityPath}, terminalSource(opts.Terminal))
+	// Single rejects AGE-PLUGIN- lines as invalid; LoadFiles parses them
+	// without starting a plugin process. A LoadFiles failure still returns
+	// Single's error, which is the error Load would have reported.
+	set, lerr := key.LoadFiles([]*key.IdentityFile{f}, terminalSource(opts.Terminal))
 	if lerr != nil {
 		return nil, err
 	}

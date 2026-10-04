@@ -584,6 +584,7 @@ gate in front of an exportable key.
 | `identity bundle version is not supported` | The first non-empty line is not `# envelope-bundle: v1` | Use a v1 bundle; a newer format needs a newer Envelope |
 | `identity bundle has an unknown or malformed field` | An `# envelope-…` line is unknown or not `# envelope-<key>: <value>` | Restore a known-good copy of the bundle; do not hand-edit envelope fields |
 | `identity bundle exceeds size limit` | The file is larger than 64 KiB | Use another copy of the bundle; a real bundle is small |
+| `identity file exceeds size limit` | The identity file is larger than 16 MiB | Refused before the file is read. 16 MiB is age's own identity parse limit, so a file age would parse in full is not refused |
 | `identity bundle requires at least one recipient` | The bundle would record no public recipient, so it could not split | Get the public recipient from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) and record it |
 | `identity bundle pin is corrupt` | The wrapped seed does not match this bundle's `mac_key_id` | Restore a known-good copy of the bundle; do not regenerate a seed |
 | `plugin identity has no local recipient string` | A plugin identity stub carries no public key | Record the recipient with `envelope bind`, or get it from the plugin's own listing (`age-plugin-yubikey --list-all` for YubiKey) |

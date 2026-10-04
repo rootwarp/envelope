@@ -21,6 +21,31 @@ import (
 	"github.com/rootwarp/envelope/test/fakeplugin"
 )
 
+func TestBindMissingBundleReportsStat(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-bundle.txt")
+	_, statErr := os.Stat(missing)
+	for _, mode := range []BindMode{BindAddRecipient, BindReplaceIdentity} {
+		_, err := Bind(context.Background(), BindOptions{
+			Mode:       mode,
+			BundlePath: missing,
+		}, io.Discard)
+		if err == nil || statErr == nil || err.Error() != statErr.Error() {
+			t.Fatalf("mode %d err = %v, stat %v", mode, err, statErr)
+		}
+	}
+
+	dir := t.TempDir()
+	_, readErr := os.ReadFile(dir)
+	_, err := Bind(context.Background(), BindOptions{
+		Mode:          BindCreate,
+		IdentityPaths: []string{dir},
+		OutPath:       filepath.Join(t.TempDir(), "out.txt"),
+	}, io.Discard)
+	if err == nil || readErr == nil || err.Error() != readErr.Error() {
+		t.Fatalf("create dir err = %v, read %v", err, readErr)
+	}
+}
+
 func TestBindCreateNative(t *testing.T) {
 	path, rec := mustNativeID(t)
 	out := filepath.Join(t.TempDir(), "bundle.txt")
