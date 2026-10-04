@@ -446,7 +446,7 @@ func resealV2(t *testing.T, bundle, src, dst string) {
 		t.Fatal(err)
 	}
 	defer clear(mac)
-	out, err := manifest.Seal(m, mac, rs)
+	out, err := manifest.Seal(m.Fields(), mac, rs)
 	if err != nil {
 		t.Fatal(err)
 	}

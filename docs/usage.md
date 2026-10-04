@@ -257,6 +257,36 @@ the walk reached — a rotten redundant copy is visible here and invisible to
 damaged: at least one shard failed its digest`. A manifest or identity
 failure prints nothing on stdout and the same message restore would.
 
+## Memory
+
+Split, restore, and verify hold the whole ciphertext in memory. Nothing
+refuses a large file.
+
+`C` is the ciphertext size: the `encrypted N bytes` line from split, the file
+plus a small age overhead. The ceilings are
+
+- split ≤ max(4.5, n/k + 1.5) × C + 16 MiB
+- restore and verify ≤ (n/k + 4.5) × C + 16 MiB
+
+They are not the same bound. Split's peak is the ciphertext buffer doubling,
+about 4.5 × C at an unlucky size for every (k, n), unless n/k is high enough
+that the stripes cost more. Restore and verify keep all n stripes live while
+they fill a second buffer. At the default 3-of-5 that is 4.5 × C for split and
+about 6.2 × C for restore and verify, plus 16 MiB either way. How many `-in`
+directories you pass does not change it.
+
+```sh
+dd if=/dev/urandom of=p.bin bs=1048576 count=256
+/usr/bin/time -l envelope split -identity id.txt -in p.bin -out sh -k 3 -n 5
+/usr/bin/time -l envelope restore -identity id.txt -in sh -out r.bin
+```
+
+On Linux use `/usr/bin/time -v` for the same two runs. macOS reports the
+maximum resident set in bytes; Linux reports it in kilobytes.
+
+A file that does not fit dies with `fatal error: out of memory`, exit 2. That
+exit is not a usage error. See [Troubleshooting](#troubleshooting).
+
 ## Print the recipient
 
 ```sh
@@ -569,6 +599,7 @@ gate in front of an exportable key.
 | `k must be at least 1` / `n must be greater than k` / `n must not exceed 256` | Invalid `(k, n)` | Pick `1 ≤ k < n ≤ 256` |
 | `no manifest.age in the shard directory: …` | `manifest.age` wasn't copied into `-in` | Copy any surviving copy of the manifest in |
 | `a .partial file from a previous run is present: …` | An earlier restore was killed hard (e.g. power loss) | Delete the `.partial` — it may hold plaintext — then retry |
+| `fatal error: out of memory` | The process ran out of memory. Exit 2 here is not a usage error | Restore exhausts memory before `.partial` exists and leaves nothing. Split leaves an empty `0700` `-out` directory |
 | `output written but directory could not be synced: …` | The restored file was renamed into place, then directory fsync failed | Keep the output; treat crash durability of the directory entry as uncertain |
 | `need at least K usable shards, have H` | Fewer than `k` shards survived the digest check | Find more shards; check that names/indices are right |
 | `unusable shard at index N` | That path exists but is not a usable regular file | Remove the stray directory/FIFO or ignore it if `k` others are good |

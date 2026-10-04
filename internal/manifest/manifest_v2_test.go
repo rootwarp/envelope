@@ -191,7 +191,7 @@ func TestSealRefusesVersionPinWithMACSourceScalar(t *testing.T) {
 	_, id := testKey(t)
 	m := goldenV2(bytes.Repeat([]byte{0x22}, MACKeyIDLen))
 	m.MACSource = MACSourceScalar
-	blob, err := Seal(m, bytes.Repeat([]byte{0x11}, MACLen), id)
+	blob, err := Seal(m.Fields(), bytes.Repeat([]byte{0x11}, MACLen), id)
 	if blob != nil {
 		t.Fatal("Seal returned a blob")
 	}
@@ -312,7 +312,7 @@ func TestOpenV2StepOrder(t *testing.T) {
 	t.Run("inconsistent StripeLen last", func(t *testing.T) {
 		m := goldenV2(bytes.Clone(fx.keyID))
 		m.StripeLen++
-		blob, err := Seal(m, fx.macKey, fx.id)
+		blob, err := Seal(m.Fields(), fx.macKey, fx.id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -463,9 +463,8 @@ func TestOpenRejectsRecipientOnlyForgeryBeforeShardRead(t *testing.T) {
 		CiphertextLen: int64(k) * int64(len(stripe)),
 		StripeLen:     int64(len(stripe)),
 		Digests:       digests,
-		MAC:           make([]byte, MACLen),
 	}
-	blob, err := Seal(m, forgerKey, rs)
+	blob, err := Seal(m.Fields(), forgerKey, rs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +514,7 @@ func TestOpenKeyIDMismatchZeroInteractions(t *testing.T) {
 
 func TestOpenV1WithHardwareBundleStubZeroInteractions(t *testing.T) {
 	macKey, id := testKey(t)
-	blob, err := Seal(golden35(), macKey, id)
+	blob, err := Seal(golden35().Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,10 +590,13 @@ func sealedV2(t *testing.T) v2fix {
 	macKey := bytes.Repeat([]byte{0x11}, MACLen)
 	keyID := bytes.Repeat([]byte{0x22}, MACKeyIDLen)
 	m := goldenV2(keyID)
-	blob, err := Seal(m, macKey, id)
+	blob, err := Seal(m.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Seal does not write the tag back. Derive it from the encoding Open
+	// checks, rather than from a struct Seal used to mutate.
+	m.MAC = hmacSHA256(macKey, m.encodeMACInput())
 	return v2fix{blob: blob, macKey: macKey, keyID: keyID, id: id, m: m}
 }
 

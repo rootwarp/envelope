@@ -271,6 +271,12 @@ func marshalBundle(b *Bundle) ([]byte, error) {
 	if len(data) > bundleMaxBytes {
 		return nil, ErrBundleTooLarge
 	}
+	// Round-trip through the parser so what we write is exactly what ReadBundle
+	// accepts. The bytes stay Marshal's: a refusal writes nothing, and a
+	// success does not rewrite the caller.
+	if _, err := parseBundle(data); err != nil {
+		return nil, err
+	}
 	return data, nil
 }
 

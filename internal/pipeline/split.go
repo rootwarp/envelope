@@ -212,21 +212,20 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		digests[i] = d
 	}
 
-	man := &manifest.Manifest{
+	fields := manifest.Fields{
 		Version:       manifest.Version,
 		K:             opts.K,
 		N:             opts.N,
 		CiphertextLen: ciphertextLen,
 		StripeLen:     stripeLen,
 		Digests:       digests,
-		MAC:           make([]byte, manifest.MACLen), // Seal validates shape before filling the tag
 	}
 	if !v1 {
-		man.Version = manifest.VersionPin
-		man.MACSource = manifest.MACSourcePin
-		man.MACKeyID = macKeyID
+		fields.Version = manifest.VersionPin
+		fields.MACSource = manifest.MACSourcePin
+		fields.MACKeyID = macKeyID
 	}
-	sealed, err := manifest.Seal(man, macKey, rs)
+	sealed, err := manifest.Seal(fields, macKey, rs)
 	if err != nil {
 		return nil, err
 	}

@@ -60,6 +60,33 @@ type Manifest struct {
 	MAC           []byte   `json:"mac"`     // 32 bytes; NOT part of macInput
 }
 
+// Fields is the write input for Seal. It carries no tag, so no caller can
+// supply, pre-fill, or forget a MAC.
+type Fields struct {
+	Version       uint32
+	MACSource     uint32
+	MACKeyID      []byte
+	K             int
+	N             int
+	CiphertextLen int64
+	StripeLen     int64
+	Digests       [][]byte
+}
+
+// Fields returns the write input for re-sealing a decoded manifest.
+func (m *Manifest) Fields() Fields {
+	return Fields{
+		Version:       m.Version,
+		MACSource:     m.MACSource,
+		MACKeyID:      m.MACKeyID,
+		K:             m.K,
+		N:             m.N,
+		CiphertextLen: m.CiphertextLen,
+		StripeLen:     m.StripeLen,
+		Digests:       m.Digests,
+	}
+}
+
 // MACKeySource resolves the HMAC key a manifest names. KeyIDFor is card-free
 // and is consulted first; KeyFor may start a plugin process.
 type MACKeySource interface {
@@ -92,17 +119,29 @@ var (
 	ErrInconsistent       = errors.New("authentic manifest is internally inconsistent")
 )
 
-// Seal computes the MAC, marshals the body, and encrypts it with s.
-// VersionPin is written only with MACSourcePin and a 16-byte id.
-func Seal(m *Manifest, macKey []byte, s Sealer) ([]byte, error) {
-	if m.Version == VersionPin && m.MACSource != MACSourcePin {
+// Seal checks the pin, validates the fields, computes the MAC, marshals, and
+// encrypts with s. The pin check is first, then validateFields, then the HMAC,
+// then json.Marshal of that same struct, so the JSON body is byte-identical to
+// marshalling the decoded Manifest. VersionPin is written only with
+// MACSourcePin and a 16-byte id.
+func Seal(f Fields, macKey []byte, s Sealer) ([]byte, error) {
+	if f.Version == VersionPin && f.MACSource != MACSourcePin {
 		return nil, ErrUnknownMACSource
 	}
-	in, err := m.macInput()
-	if err != nil {
+	m := &Manifest{
+		Version:       f.Version,
+		MACSource:     f.MACSource,
+		MACKeyID:      f.MACKeyID,
+		K:             f.K,
+		N:             f.N,
+		CiphertextLen: f.CiphertextLen,
+		StripeLen:     f.StripeLen,
+		Digests:       f.Digests,
+	}
+	if err := m.validateFields(); err != nil {
 		return nil, err
 	}
-	m.MAC = hmacSHA256(macKey, in)
+	m.MAC = hmacSHA256(macKey, m.encodeMACInput())
 	body, err := json.Marshal(m)
 	if err != nil {
 		return nil, err
@@ -172,6 +211,18 @@ func hmacSHA256(macKey, in []byte) []byte {
 }
 
 func (m *Manifest) validateShape() error {
+	if err := m.validateFields(); err != nil {
+		return err
+	}
+	if len(m.MAC) != MACLen {
+		return ErrMalformed
+	}
+	return nil
+}
+
+// validateFields checks the fields the MAC covers. It does not look at the
+// tag, so Seal can run it before the tag exists.
+func (m *Manifest) validateFields() error {
 	if m.K < 1 || m.N <= m.K || m.N > 256 {
 		return ErrMalformed
 	}
@@ -192,9 +243,6 @@ func (m *Manifest) validateShape() error {
 			return ErrMalformed
 		}
 	}
-	if len(m.MAC) != MACLen {
-		return ErrMalformed
-	}
 	if m.Version == VersionPin {
 		// The encoding is injective ONLY because every MAC key id is exactly 16 bytes. A
 		// 15-byte id would shift every subsequent byte and let two distinct manifests share
@@ -212,14 +260,20 @@ func (m *Manifest) validateShape() error {
 }
 
 // macInput builds the stable binary encoding HMAC sees. validateShape runs first
-// so the uint32/uint64 conversions cannot wrap a negative int. Fields are
-// appended by hand; a serializer (or a Go int) must never define this layout.
+// so the uint32/uint64 conversions cannot wrap a negative int.
 func (m *Manifest) macInput() ([]byte, error) {
 	if err := m.validateShape(); err != nil {
 		return nil, err
 	}
+	return m.encodeMACInput(), nil
+}
+
+// encodeMACInput appends fields by hand. A serializer (or a Go int) must never
+// define this layout. The caller has passed validateFields, so the conversions
+// cannot wrap and every digest and v2 key id has the width the checks require.
+func (m *Manifest) encodeMACInput() []byte {
 	if m.Version == VersionPin {
-		return m.macInputPin(), nil
+		return m.macInputPin()
 	}
 	b := make([]byte, 0, 28+32*len(m.Digests))
 	b = binary.BigEndian.AppendUint32(b, m.Version)
@@ -228,16 +282,16 @@ func (m *Manifest) macInput() ([]byte, error) {
 	b = binary.BigEndian.AppendUint64(b, uint64(m.CiphertextLen))
 	b = binary.BigEndian.AppendUint64(b, uint64(m.StripeLen))
 	for _, d := range m.Digests {
-		b = append(b, d...) // validateShape guarantees len(d) == 32
+		b = append(b, d...) // validateFields guarantees len(d) == 32
 	}
-	return b, nil
+	return b
 }
 
 func (m *Manifest) macInputPin() []byte {
 	b := make([]byte, 0, 48+32*len(m.Digests))
 	b = binary.BigEndian.AppendUint32(b, m.Version)
 	b = binary.BigEndian.AppendUint32(b, m.MACSource)
-	b = append(b, m.MACKeyID...) // validateShape guarantees len == 16
+	b = append(b, m.MACKeyID...) // validateFields guarantees len == 16
 	b = binary.BigEndian.AppendUint32(b, uint32(m.K))
 	b = binary.BigEndian.AppendUint32(b, uint32(m.N))
 	b = binary.BigEndian.AppendUint64(b, uint64(m.CiphertextLen))

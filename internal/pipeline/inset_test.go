@@ -211,7 +211,7 @@ func reseal(t *testing.T, identityPath, srcManifest, dstManifest string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := manifest.Seal(m, macKey, id)
+	out, err := manifest.Seal(m.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestConflictingManifests(t *testing.T) {
 	}
 	m.Digests[0] = bytes.Clone(m.Digests[0])
 	m.Digests[0][0] ^= 0x01
-	altered, err := manifest.Seal(m, macKey, id)
+	altered, err := manifest.Seal(m.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}

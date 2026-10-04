@@ -263,13 +263,16 @@ func TestV1JSONOmitsMACSourceFields(t *testing.T) {
 func TestSealOpenRoundTrip(t *testing.T) {
 	macKey, id := testKey(t)
 	want := golden35()
-	blob, err := Seal(want, macKey, id)
+	blob, err := Seal(want.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(blob) == 0 {
 		t.Fatal("Seal returned empty blob")
 	}
+	// Seal does not write the tag back. Derive it from the encoding Open
+	// checks, rather than from a struct Seal used to mutate.
+	want.MAC = hmacSHA256(macKey, want.encodeMACInput())
 	got, err := Open(blob, id, id)
 	if err != nil {
 		t.Fatal(err)
@@ -331,7 +334,7 @@ func TestOpenInconsistentIsNotMACMismatch(t *testing.T) {
 	macKey, id := testKey(t)
 	m := golden35()
 	m.StripeLen++
-	blob, err := Seal(m, macKey, id)
+	blob, err := Seal(m.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +417,7 @@ func TestDuplicateKeyFailsMAC(t *testing.T) {
 	m := shaped(3, 16)
 	m.CiphertextLen = 48
 	m.StripeLen = StripeLen(48, 3)
-	orig, err := Seal(m, macKey, id)
+	orig, err := Seal(m.Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +521,7 @@ func testKey(t *testing.T) (macKey []byte, id *key.Identity) {
 func sealedGolden(t *testing.T) sealFix {
 	t.Helper()
 	macKey, id := testKey(t)
-	blob, err := Seal(golden35(), macKey, id)
+	blob, err := Seal(golden35().Fields(), macKey, id)
 	if err != nil {
 		t.Fatal(err)
 	}

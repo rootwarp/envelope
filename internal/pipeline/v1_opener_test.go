@@ -190,7 +190,7 @@ func rewriteManifestMAC(t *testing.T, encPath, macPath, manifestPath string) {
 		t.Fatal(err)
 	}
 	defer clear(macKey)
-	out, err := manifest.Seal(m, macKey, enc)
+	out, err := manifest.Seal(m.Fields(), macKey, enc)
 	if err != nil {
 		t.Fatal(err)
 	}

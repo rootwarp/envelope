@@ -158,6 +158,71 @@ func TestWriteNewRefusesExisting(t *testing.T) {
 	assertSameBytes(t, got, want)
 }
 
+func TestWriteNewRefusesUnreadableBundle(t *testing.T) {
+	id, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(id.Zero)
+	ident := id.age.String()
+	rec, err := id.RecipientString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := bytes.Repeat([]byte{0xab}, MACKeyIDLen)
+	pin := []byte("pin-fixture")
+
+	cases := []struct {
+		name string
+		b    *Bundle
+		want error
+	}{
+		{"15-byte MACKeyID", &Bundle{MACKeyID: mac[:15], Recipients: []string{rec}, Pin: pin, Identities: []string{ident}}, ErrBundleField},
+		{"no recipient", &Bundle{MACKeyID: mac, Pin: pin, Identities: []string{ident}}, ErrBundleNoRecipient},
+		{"no identity", &Bundle{MACKeyID: mac, Recipients: []string{rec}, Pin: pin}, ErrInvalidIdentity},
+		{"empty pin", &Bundle{MACKeyID: mac, Recipients: []string{rec}, Identities: []string{ident}}, ErrBundleField},
+	}
+	if len(cases) != 4 {
+		t.Fatalf("cases = %d, want 4", len(cases))
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			before := tt.b.Marshal()
+			path := filepath.Join(t.TempDir(), "bundle.txt")
+			err := WriteNew(path, tt.b)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("errors.Is(., %v) = false: %v", tt.want, err)
+			}
+			if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("stat after refusal: %v", statErr)
+			}
+			if !bytes.Equal(tt.b.Marshal(), before) {
+				t.Fatal("WriteNew rewrote the caller")
+			}
+		})
+	}
+
+	b, _ := mustNativeBundle(t)
+	before := b.Marshal()
+	path := filepath.Join(t.TempDir(), "bundle.txt")
+	if err := WriteNew(path, b); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b.Marshal(), before) {
+		t.Fatal("WriteNew rewrote the control bundle")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ReadBundle(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameBytes(t, got, before)
+	assertSameBytes(t, parsed.Marshal(), before)
+}
+
 func TestBundleNoCleartextSecret(t *testing.T) {
 	b, id := mustNativeBundle(t)
 	path := filepath.Join(t.TempDir(), "bundle.txt")
