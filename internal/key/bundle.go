@@ -19,6 +19,8 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/plugin"
+
+	"github.com/rootwarp/envelope/internal/filetxn"
 )
 
 const (
@@ -224,48 +226,33 @@ func WriteNew(path string, b *Bundle) error {
 }
 
 // Replace writes path+".tmp" with WriteNew's sequence, then renames onto path
-// and syncs the directory — split's manifest commit sequence. Never in place.
-// It is ReplaceContext with a background context. Callers that can be
-// cancelled should use ReplaceContext.
-func Replace(path string, b *Bundle) error {
-	return ReplaceContext(context.Background(), path, b)
-}
-
-// ReplaceContext is the ctx-aware entry callers should use. It writes
-// path+".tmp" with WriteNew's sequence, then renames onto path and syncs the
-// directory. The commit point is that rename: a cancellation observed before
-// it aborts and removes only the temporary file this call created. One
-// observed after the rename lets the directory sync finish.
-func ReplaceContext(ctx context.Context, path string, b *Bundle) error {
+// and syncs the directory. The rename is the commit point. A cancellation
+// observed before it removes only the temporary file this call created. One
+// observed after the rename lets the directory sync finish. Never in place.
+func Replace(ctx context.Context, path string, b *Bundle) error {
 	data, err := marshalBundle(b)
 	if err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	// No cleanup here. writeNew0600 removes a tmp it created and failed to
-	// finish; when its O_EXCL create fails, tmp belongs to someone else (a
-	// concurrent bind, or an interrupted one the operator has not inspected)
-	// and must survive.
-	if err := writeNew0600(tmp, data); err != nil {
+	txn := filetxn.Begin(filepath.Dir(path), filetxn.Options{Rename: ReplaceRename})
+	f, err := txn.Create(tmp, 0o600)
+	if err != nil {
+		// EEXIST owns nothing, so do not abort: tmp belongs to someone else
+		// (a concurrent bind, or one the operator has not inspected).
+		if errors.Is(err, os.ErrExist) {
+			return ErrIdentityExists
+		}
 		return err
 	}
-	rename := os.Rename
-	if ReplaceRename != nil {
-		rename = ReplaceRename
-	}
-	// The rename publishes. A cancel seen before it aborts and removes only
-	// this run's temp.
-	if err := ctx.Err(); err != nil {
-		_ = os.Remove(tmp)
+	if err := writeNew0600Opened(txn, f, tmp, data); err != nil {
+		_ = txn.Abort()
 		return err
 	}
-	if err := rename(tmp, path); err != nil {
-		// A failed commit must not leave path.tmp: bind's interrupted
-		// modify is otherwise indistinguishable from a second bundle.
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := syncDir(filepath.Dir(path)); err != nil {
+	if err := txn.Commit(ctx, tmp, path); err != nil {
+		// Commit does not abort. Abort removes tmp when the rename did not
+		// publish, and removes nothing once the rename has committed.
+		_ = txn.Abort()
 		return err
 	}
 	b.Path = path

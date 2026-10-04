@@ -17,11 +17,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"filippo.io/age"
 
 	"github.com/rootwarp/envelope/internal/crypt"
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key/bech32"
 )
 
@@ -92,25 +92,27 @@ func Create(path string) (*Identity, error) {
 }
 
 // writeNew0600 is the keygen durability sequence: O_EXCL 0600, write, Sync,
-// Close, Chmod 0600, syncDir. ErrIdentityExists on an existing path.
+// Close, Chmod 0600, sync the directory. ErrIdentityExists on an existing path.
 func writeNew0600(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	txn := filetxn.Begin(filepath.Dir(path), filetxn.Options{})
+	f, err := txn.Create(path, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return ErrIdentityExists
 		}
 		return err
 	}
-	if err := writeNew0600Opened(f, path, data); err != nil {
+	if err := writeNew0600Opened(txn, f, path, data); err != nil {
 		// A leftover after O_EXCL makes retry "already exists" and a
 		// Replace tmp look like a second bundle.
-		_ = os.Remove(path)
+		_ = txn.Abort()
 		return err
 	}
+	txn.Done()
 	return nil
 }
 
-func writeNew0600Opened(f *os.File, path string, data []byte) error {
+func writeNew0600Opened(txn *filetxn.Txn, f *os.File, path string, data []byte) error {
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return err
@@ -132,25 +134,12 @@ func writeNew0600Opened(f *os.File, path string, data []byte) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	return txn.SyncDir()
 }
 
 // testFailWriteNew, when set, runs after Write and replaces Sync. Tests
 // inject a write/sync failure after O_EXCL create.
 var testFailWriteNew func() error
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	if err := d.Sync(); err != nil &&
-		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-		return err
-	}
-	return nil
-}
 
 // Load parses path with age.ParseIdentities and rejects anything that is not
 // exactly one *age.X25519Identity, then recovers the scalar.

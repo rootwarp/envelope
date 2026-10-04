@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Import-graph and grep gates (FR-20, FR-19, FR-24, FR-35, FR-YK-18, FR-YK-08).
 # D1: crypt and erasure never depend on each other (FR-20 AC).
-# D2: pipeline imports only key, crypt, erasure, manifest + stdlib.
+# D2: pipeline imports only key, crypt, erasure, manifest, filetxn + stdlib.
 # D3: nothing under internal/ imports pipeline; cmd/envelope is its only importer.
 # D4: manifest imports no internal package.
 # D5: internal/key/bech32 and internal/key/tty are imported by internal/key only.
 # D6: only cmd/envelope may import github.com/urfave/cli/v3.
 # D7: cmd/envelope imports only pipeline, urfave/cli/v3 + stdlib.
-# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib.
+# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, internal/filetxn, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib.
 # D9: filippo.io/age/plugin is imported by internal/key and test/fakeplugin only.
 # D10: test/fakeplugin is imported by _test.go files only.
 # D11: the literal yubikey appears nowhere under internal/ or cmd/.
 # D12: SysProcAttr / Setpgid appear nowhere in the tree.
+# D13: filetxn imports stdlib only; only key and pipeline import it.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -45,17 +46,17 @@ if [ -d internal/erasure ]; then
 	fi
 fi
 
-# D2: pipeline imports only key, crypt, erasure, manifest + stdlib.
+# D2: pipeline imports only key, crypt, erasure, manifest, filetxn + stdlib.
 if pkg_exists ./internal/pipeline; then
 	while IFS= read -r imp; do
 		[ -n "$imp" ] || continue
 		case "$imp" in
-		"$mod/internal/key" | "$mod/internal/crypt" | "$mod/internal/erasure" | "$mod/internal/manifest")
+		"$mod/internal/key" | "$mod/internal/crypt" | "$mod/internal/erasure" | "$mod/internal/manifest" | "$mod/internal/filetxn")
 			continue
 			;;
 		esac
 		if [ "$(go list -f '{{.Standard}}' "$imp")" != true ]; then
-			fail "D2: pipeline imports $imp (only key, crypt, erasure, manifest + stdlib allowed)"
+			fail "D2: pipeline imports $imp (only key, crypt, erasure, manifest, filetxn + stdlib allowed)"
 		fi
 	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/internal/pipeline"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./internal/pipeline)
 fi
@@ -153,7 +154,7 @@ if pkg_exists ./cmd/envelope; then
 	done < <(go list -deps -f '{{if eq .ImportPath "'"$mod"'/cmd/envelope"}}{{range .Imports}}{{.}}{{"\n"}}{{end}}{{end}}' ./cmd/envelope)
 fi
 
-# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib.
+# D8: internal/key may import only internal/key/bech32, internal/key/tty, internal/crypt, internal/filetxn, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib.
 # Inspect Imports+TestImports+XTestImports (D6's form) of the key package itself.
 # test/fakeplugin is TestMain dispatch; D10 already forbids it from non-test sources.
 if pkg_exists ./internal/key; then
@@ -165,12 +166,12 @@ if pkg_exists ./internal/key; then
 			continue
 		fi
 		case "$imp" in
-		"$mod/internal/key/bech32" | "$mod/internal/key/tty" | "$mod/internal/crypt" | "filippo.io/age" | "filippo.io/age/plugin" | "golang.org/x/term" | "golang.org/x/sys" | "golang.org/x/sys/"* | "$mod/test/fakeplugin")
+		"$mod/internal/key/bech32" | "$mod/internal/key/tty" | "$mod/internal/crypt" | "$mod/internal/filetxn" | "filippo.io/age" | "filippo.io/age/plugin" | "golang.org/x/term" | "golang.org/x/sys" | "golang.org/x/sys/"* | "$mod/test/fakeplugin")
 			continue
 			;;
 		esac
 		if [ "$(go list -f '{{.Standard}}' "$imp")" != true ]; then
-			fail "D8: internal/key imports $imp (only internal/key/bech32, internal/key/tty, internal/crypt, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib allowed)"
+			fail "D8: internal/key imports $imp (only internal/key/bech32, internal/key/tty, internal/crypt, internal/filetxn, filippo.io/age, filippo.io/age/plugin, golang.org/x/term, golang.org/x/sys + stdlib allowed)"
 		fi
 	done < <(go list -f '{{range .Imports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .TestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}} {{$.ImportPath}}{{"\n"}}{{end}}' ./internal/key)
 fi
@@ -214,6 +215,24 @@ fi
 # D12: SysProcAttr / Setpgid appear nowhere in the tree.
 if matches=$(grep -rnE --include='*.go' 'SysProcAttr|Setpgid' .); then
 	fail "D12: SysProcAttr / Setpgid in the tree" "$matches"
+fi
+
+# D13: filetxn imports stdlib only; only key and pipeline import it.
+if pkg_exists ./internal/filetxn; then
+	while IFS= read -r imp; do
+		[ -n "$imp" ] || continue
+		if [ "$(go list -f '{{.Standard}}' "$imp")" != true ]; then
+			fail "D13: filetxn imports $imp (stdlib only)"
+		fi
+	done < <(go list -f '{{range .Imports}}{{.}}{{"\n"}}{{end}}{{range .TestImports}}{{.}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}}{{"\n"}}{{end}}' ./internal/filetxn)
+
+	while IFS= read -r importer; do
+		[ -n "$importer" ] || continue
+		case "$importer" in
+		"$mod/internal/key" | "$mod/internal/pipeline") continue ;;
+		esac
+		fail "D13: $importer imports filetxn (only key and pipeline may)"
+	done < <(go list -f '{{range .Imports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}{{range .TestImports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}{{range .XTestImports}}{{if eq . "'"$mod"'/internal/filetxn"}}{{$.ImportPath}}{{"\n"}}{{end}}{{end}}' ./...)
 fi
 
 # FR-35: no os.Stdout / os.Stderr below the entry point …

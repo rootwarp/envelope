@@ -2,6 +2,7 @@ package key
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -467,7 +468,7 @@ func TestReplaceCrashSafe(t *testing.T) {
 	ReplaceRename = func(string, string) error { return injected }
 	t.Cleanup(func() { ReplaceRename = nil })
 
-	err = Replace(path, b)
+	err = Replace(context.Background(), path, b)
 	if !errors.Is(err, injected) {
 		t.Fatalf("errors.Is(., injected) = false: %v", err)
 	}
@@ -505,7 +506,7 @@ func TestReplaceWriteFailureLeavesNoTmp(t *testing.T) {
 	testFailWriteNew = func() error { return injected }
 	t.Cleanup(func() { testFailWriteNew = nil })
 
-	err = Replace(path, b)
+	err = Replace(context.Background(), path, b)
 	if !errors.Is(err, injected) {
 		t.Fatalf("errors.Is(., injected) = false: %v", err)
 	}
@@ -530,7 +531,7 @@ func TestReplacePreservesUnownedTmp(t *testing.T) {
 	if err := os.WriteFile(tmp, marker, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := Replace(path, b)
+	err := Replace(context.Background(), path, b)
 	if !errors.Is(err, ErrIdentityExists) {
 		t.Fatalf("errors.Is(., ErrIdentityExists) = false: %v", err)
 	}

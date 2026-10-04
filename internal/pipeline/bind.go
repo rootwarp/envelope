@@ -126,7 +126,7 @@ func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error
 	if ObserveBindInteractions != nil {
 		ObserveBindInteractions(set.Interactions())
 	}
-	if err := key.ReplaceContext(ctx, opts.BundlePath, b); err != nil {
+	if err := key.Replace(ctx, opts.BundlePath, b); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil
@@ -144,7 +144,7 @@ func bindReplaceIdentity(ctx context.Context, opts BindOptions) (*BindReport, er
 	if err := b.ReplaceIdentities(lines); err != nil {
 		return nil, err
 	}
-	if err := key.ReplaceContext(ctx, opts.BundlePath, b); err != nil {
+	if err := key.Replace(ctx, opts.BundlePath, b); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil
