@@ -519,6 +519,30 @@ func TestReplaceWriteFailureLeavesNoTmp(t *testing.T) {
 	}
 }
 
+func TestReplacePreservesUnownedTmp(t *testing.T) {
+	b, _ := mustNativeBundle(t)
+	path := filepath.Join(t.TempDir(), "bundle.txt")
+	if err := WriteNew(path, b); err != nil {
+		t.Fatal(err)
+	}
+	tmp := path + ".tmp"
+	marker := []byte("owned by another operation")
+	if err := os.WriteFile(tmp, marker, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Replace(path, b)
+	if !errors.Is(err, ErrIdentityExists) {
+		t.Fatalf("errors.Is(., ErrIdentityExists) = false: %v", err)
+	}
+	got, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("unowned temporary file removed or altered: %v", err)
+	}
+	if !bytes.Equal(got, marker) {
+		t.Fatal("unowned temporary file removed or altered")
+	}
+}
+
 func TestPinWrappedToRecordedRecipients(t *testing.T) {
 	a, err := Generate()
 	if err != nil {

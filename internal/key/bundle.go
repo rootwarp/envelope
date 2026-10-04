@@ -230,8 +230,11 @@ func Replace(path string, b *Bundle) error {
 		return err
 	}
 	tmp := path + ".tmp"
+	// No cleanup here. writeNew0600 removes a tmp it created and failed to
+	// finish; when its O_EXCL create fails, tmp belongs to someone else (a
+	// concurrent bind, or an interrupted one the operator has not inspected)
+	// and must survive.
 	if err := writeNew0600(tmp, data); err != nil {
-		_ = os.Remove(tmp)
 		return err
 	}
 	rename := os.Rename
