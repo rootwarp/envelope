@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/rootwarp/envelope/internal/erasure"
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
@@ -129,6 +130,11 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 
+	// The transaction removes only what it created. Error paths deliberately
+	// do not abort, so a crash between the shards and the manifest still
+	// leaves the shards. Restore aborts until Commit publishes its partial.
+	txn := filetxn.Begin(opts.OutDir, pipelineFileTxnOptions())
+
 	in, err := os.Open(opts.InPath)
 	if err != nil {
 		return nil, err
@@ -146,7 +152,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 			return nil, err
 		}
 	}
-	if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+	if err := abortCanceledSplit(ctx, txn); err != nil {
 		return nil, err
 	}
 	if testAtCiphertext != nil {
@@ -163,22 +169,21 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if !v1 {
 		// This is the only point where the pin may be unwrapped: after the
 		// payload is encrypted to the recorded recipients and before the
-		// first shard is written. An interrupted plugin prompt here must
-		// leave no shard behind: shards written before this return (none,
-		// unless a test injected them) must not survive.
+		// first shard is written. Abort removes only paths this call created,
+		// and nothing has been created yet.
 		if err := refuseInteractiveWithoutTerminal(set); err != nil {
-			removeIncompleteSplit(opts.OutDir)
+			_ = txn.Abort()
 			return nil, err
 		}
 		macKey, err = set.KeyFor(manifest.VersionPin, manifest.MACSourcePin)
 		if err != nil {
-			removeIncompleteSplit(opts.OutDir)
+			_ = txn.Abort()
 			return nil, pinErr(err)
 		}
 		defer clear(macKey)
 		macKeyID, err = set.KeyIDFor(manifest.VersionPin, manifest.MACSourcePin)
 		if err != nil {
-			removeIncompleteSplit(opts.OutDir)
+			_ = txn.Abort()
 			return nil, pinErr(err)
 		}
 	}
@@ -197,10 +202,10 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		if testBeforeShardWrite != nil {
 			testBeforeShardWrite(i)
 		}
-		if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+		if err := abortCanceledSplit(ctx, txn); err != nil {
 			return nil, err
 		}
-		d, err := writeShard(opts.OutDir, i, shard)
+		d, err := writeShard(txn, opts.OutDir, i, shard)
 		if err != nil {
 			return nil, err
 		}
@@ -226,16 +231,16 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 		return nil, err
 	}
 
-	if err := abortCanceledSplit(ctx, opts.OutDir); err != nil {
+	if err := abortCanceledSplit(ctx, txn); err != nil {
 		return nil, err
 	}
-	if err := syncDir(opts.OutDir); err != nil {
+	if err := txn.SyncDir(); err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
 	}
 
 	// Commit marker: a crash between the last shard and this write leaves
 	// unusable ciphertext, never a false success. The marker is published by
-	// rename after the tmp file is synced.
+	// rename after the tmp file is synced. This return does not abort.
 	if testFailManifestWrite != nil {
 		if err := testFailManifestWrite(); err != nil {
 			return nil, err
@@ -243,14 +248,21 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	}
 	manPath := filepath.Join(opts.OutDir, "manifest.age")
 	tmpPath := manPath + ".tmp"
-	if err := writeExclusive(tmpPath, bytes.NewReader(sealed), nil); err != nil {
+	if err := writeExclusive(txn, tmpPath, bytes.NewReader(sealed), nil); err != nil {
 		return nil, err
 	}
-	if err := os.Rename(tmpPath, manPath); err != nil {
+	// Commit checks ctx immediately before the rename. A cancellation aborts
+	// and removes only paths this call created. A rename or directory-sync
+	// failure does not: the shards stay.
+	if err := txn.Commit(ctx, tmpPath, manPath); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			_ = txn.Abort()
+			return nil, err
+		}
+		if _, statErr := os.Lstat(tmpPath); errors.Is(statErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
+		}
 		return nil, err
-	}
-	if err := syncDir(opts.OutDir); err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrDirSync, opts.OutDir, err)
 	}
 
 	if status != nil {
@@ -332,49 +344,32 @@ func pinErr(err error) error {
 	return fmt.Errorf("identity bundle pin: %w", err)
 }
 
-func abortCanceledSplit(ctx context.Context, outDir string) error {
+func abortCanceledSplit(ctx context.Context, txn *filetxn.Txn) error {
 	if err := ctx.Err(); err != nil {
-		removeIncompleteSplit(outDir)
+		_ = txn.Abort()
 		return err
 	}
 	return nil
-}
-
-func removeIncompleteSplit(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		name := e.Name()
-		switch name {
-		case "manifest.age", "manifest.age.tmp":
-			_ = os.Remove(filepath.Join(dir, name))
-			continue
-		}
-		var i int
-		if _, err := fmt.Sscanf(name, "shard-%d", &i); err == nil && name == shardFileName(i) {
-			_ = os.Remove(filepath.Join(dir, name))
-		}
-	}
 }
 
 func shardFileName(i int) string {
 	return fmt.Sprintf("shard-%02d", i)
 }
 
-func writeShard(dir string, i int, data []byte) ([]byte, error) {
+func writeShard(txn *filetxn.Txn, dir string, i int, data []byte) ([]byte, error) {
 	h := erasure.NewDigest()
 	path := filepath.Join(dir, shardFileName(i))
-	if err := writeExclusive(path, bytes.NewReader(data), h); err != nil {
+	if err := writeExclusive(txn, path, bytes.NewReader(data), h); err != nil {
 		return nil, err
 	}
 	return h.Sum(nil), nil
 }
 
-func writeExclusive(path string, r io.Reader, extra io.Writer) error {
+func writeExclusive(txn *filetxn.Txn, path string, r io.Reader, extra io.Writer) error {
 	// O_EXCL: never truncate a file that appeared after the empty-dir listing.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	// The manifest rename is the commit; this path stays owned until then so
+	// a cancel can still remove it.
+	f, err := txn.Create(path, 0o644)
 	if err != nil {
 		return err
 	}
@@ -422,7 +417,7 @@ func mkdirAllDurable(path string, perm os.FileMode) error {
 	if err := os.Mkdir(path, perm); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	return syncDir(parent)
+	return filetxn.Begin(parent, pipelineFileTxnOptions()).SyncDir()
 }
 
 var (

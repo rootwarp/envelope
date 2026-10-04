@@ -18,6 +18,7 @@ import (
 	"github.com/klauspost/reedsolomon"
 
 	"github.com/rootwarp/envelope/internal/erasure"
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
@@ -66,6 +67,45 @@ func TestSplitCancelDuringShardWriteRemovesOutput(t *testing.T) {
 		if name == "manifest.age" || name == "manifest.age.tmp" || strings.HasPrefix(name, "shard-") {
 			t.Fatalf("incomplete split left %s", name)
 		}
+	}
+}
+
+func TestSplitCancelBeforeManifestRenameRemovesOnlyItsOwnFiles(t *testing.T) {
+	out := t.TempDir()
+	opts := validOpts(t, out)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const foreign = "keep.txt"
+	testFailManifestWrite = func() error {
+		if err := os.WriteFile(filepath.Join(out, foreign), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		return nil
+	}
+	t.Cleanup(func() { testFailManifestWrite = nil })
+
+	_, err := Split(ctx, opts, io.Discard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false, err=%v", err)
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != foreign {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Fatalf("out = %v, want only %s", names, foreign)
+	}
+	got, err := os.ReadFile(filepath.Join(out, foreign))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "keep" {
+		t.Fatalf("foreign = %q, want keep", got)
 	}
 }
 
@@ -408,7 +448,8 @@ func TestSplitShardExclusive(t *testing.T) {
 	if _, err := rand.Read(payload); err != nil {
 		t.Fatal(err)
 	}
-	_, err := writeShard(dir, 0, payload)
+	txn := filetxn.Begin(dir, filetxn.Options{})
+	_, err := writeShard(txn, dir, 0, payload)
 	if err == nil {
 		t.Fatal("err = nil, want O_EXCL failure")
 	}

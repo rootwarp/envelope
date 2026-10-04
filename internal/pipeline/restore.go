@@ -8,10 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/rootwarp/envelope/internal/crypt"
 	"github.com/rootwarp/envelope/internal/erasure"
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key"
 	"github.com/rootwarp/envelope/internal/manifest"
 )
@@ -323,26 +323,22 @@ func readManifestBlob(path string) ([]byte, error) {
 func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set) (n int64, err error) {
 	partial := outPath + ".partial"
 
+	// The transaction removes only what it created. Restore aborts until
+	// Commit publishes the partial. Split's error paths deliberately do not
+	// abort, so a crash between the shards and the manifest still leaves
+	// the shards.
+	t := filetxn.Begin(filepath.Dir(outPath), pipelineFileTxnOptions())
 	// O_EXCL: never silently truncate a leftover .partial — that file holds plaintext.
-	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := t.Create(partial, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("create %s: %w", partial, err)
 	}
-	committed := false
 	defer func() {
-		if committed {
-			return
-		}
-		// Reaching here means err != nil: the only return n, nil sets committed first.
 		f.Close() // best effort; the real error is already in err
-		remove := os.Remove
-		if testRemove != nil {
-			remove = testRemove
-		}
-		if rerr := remove(partial); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-			// Do NOT overwrite err: the operator needs the original diagnosis
-			// AND must be told a plaintext file could not be removed.
-			err = errors.Join(err, fmt.Errorf("could not remove %s: %w", partial, rerr))
+		// A nil abort must not be joined: that wraps err in a joinError
+		// on every clean failure.
+		if aerr := t.Abort(); aerr != nil {
+			err = errors.Join(err, aerr)
 		}
 	}()
 
@@ -368,44 +364,19 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set
 	if err = f.Close(); err != nil { // Close can report deferred write errors
 		return 0, fmt.Errorf("close %s: %w", partial, err)
 	}
-	// The rename publishes. A cancel seen before it aborts and removes only
-	// this run's temp (the deferred cleanup deletes .partial).
-	if err = ctx.Err(); err != nil {
-		return 0, fmt.Errorf("payload: %w", err)
-	}
-
-	rename := os.Rename
-	if testRename != nil {
-		rename = testRename
-	}
-	if err = rename(partial, outPath); err != nil {
+	if err = t.Commit(ctx, partial, outPath); err != nil {
+		// Commit checks ctx immediately before the rename. The directory-sync
+		// error is raw and is returned only after that rename has committed,
+		// which is when partial is gone.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return 0, fmt.Errorf("payload: %w", err)
+		}
+		if _, statErr := os.Lstat(partial); errors.Is(statErr, os.ErrNotExist) {
+			return n, fmt.Errorf("%w: %s: %w", ErrDirSync, outPath, err)
+		}
 		return 0, fmt.Errorf("rename onto %s: %w", outPath, err)
 	}
-	committed = true // AFTER the rename, never before
-	if err = syncDir(filepath.Dir(outPath)); err != nil {
-		return n, fmt.Errorf("%w: %s: %w", ErrDirSync, outPath, err)
-	}
 	return n, nil
-}
-
-// syncDir fsyncs a directory so a rename into it survives a crash. EINVAL and
-// ENOTSUP are tolerated: the file is already renamed and those errors mean the
-// filesystem has no directory-sync operation.
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	sync := d.Sync
-	if testDirSync != nil {
-		sync = testDirSync
-	}
-	if err := sync(); err != nil &&
-		!errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-		return err
-	}
-	return nil
 }
 
 // ctxReader makes a copy observe cancellation, so a SIGINT turns into an
@@ -470,3 +441,17 @@ var testRemove func(name string) error
 // testDirSync replaces the directory Sync. Tests inject ENOTSUP (restore must
 // still succeed) and EIO (restore must fail after commit).
 var testDirSync func() error
+
+// pipelineFileTxnOptions fills filetxn from the seams this package already
+// has. A nil hook stays nil so filetxn keeps os.Rename, os.Remove, or its
+// own directory sync.
+func pipelineFileTxnOptions() filetxn.Options {
+	o := filetxn.Options{
+		Rename: testRename,
+		Remove: testRemove,
+	}
+	if testDirSync != nil {
+		o.SyncDir = func(string) error { return testDirSync() }
+	}
+	return o
+}

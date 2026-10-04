@@ -259,7 +259,7 @@ func TestProgrammaticCancelRefusedBeforePlugin(t *testing.T) {
 	})
 }
 
-func TestSplitS9FailureRemovesAlreadyWrittenShards(t *testing.T) {
+func TestSplitPinFailureRemovesOnlyItsOwnFiles(t *testing.T) {
 	skipWindows(t)
 	name := "envtest"
 	fakeplugin.Install(t, name)
@@ -277,19 +277,18 @@ func TestSplitS9FailureRemovesAlreadyWrittenShards(t *testing.T) {
 	}
 
 	in := filepath.Join(t.TempDir(), "in.bin")
-	if err := os.WriteFile(in, []byte("s9-cleanup"), 0o600); err != nil {
+	if err := os.WriteFile(in, []byte("pin-cleanup"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
+	// Pin unwrap runs before any shard is written, so these files are not
+	// this run's. Abort must leave them and remove anything the run created.
+	foreign := []string{shardFileName(0), "manifest.age", "manifest.age.tmp"}
 	testAtCiphertext = func([]byte) {
-		if err := os.WriteFile(filepath.Join(out, shardFileName(0)), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(out, "manifest.age"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(out, "manifest.age.tmp"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
+		for _, name := range foreign {
+			if err := os.WriteFile(filepath.Join(out, name), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Cleanup(func() { testAtCiphertext = nil })
@@ -305,8 +304,22 @@ func TestSplitS9FailureRemovesAlreadyWrittenShards(t *testing.T) {
 	if err == nil {
 		t.Fatal("err = nil, want pin-unwrap failure")
 	}
-	assertNoShardOrManifest(t, out)
-	assertNoPartialIn(t, out)
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(foreign) {
+		t.Fatalf("out has %d entries, want %d", len(entries), len(foreign))
+	}
+	for _, name := range foreign {
+		got, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if string(got) != "x" {
+			t.Fatalf("%s = %q, want injected contents", name, got)
+		}
+	}
 }
 
 func TestNoDetachedPluginProcessGroup(t *testing.T) {
