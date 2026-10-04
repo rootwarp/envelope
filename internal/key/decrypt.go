@@ -79,29 +79,28 @@ func (s *Set) DecryptBytes(blob []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// DecryptTo streams a payload. open is called once per attempt: a reader
-// handed to a failed age.Decrypt has already been consumed past the header.
+// DecryptTo streams a payload in two phases. Selection tries identities until
+// one yields a reader; the copy to dst runs only after that, and only once.
+// The boundary is that reader rather than the first byte written: a chunk
+// that fails authentication emits nothing, but the same ciphertext fails
+// under every identity, so a later attempt cannot succeed and must not append
+// a second plaintext after a partial write. open is called once per attempt
+// because a reader handed to a rejected header has already been consumed.
 func (s *Set) DecryptTo(dst io.Writer, open func() io.Reader) (int64, error) {
-	var n int64
+	var payload io.Reader
 	err := s.eachIdentity(func(id *Identity, ageID age.Identity) error {
-		src := open()
-		if id.kind == KindPlugin {
-			r, err := decryptOne(src, ageID)
-			if err != nil {
-				return err
-			}
-			var copyErr error
-			n, copyErr = io.Copy(dst, r)
-			return copyErr
-		}
 		var err error
-		n, err = crypt.Decrypt(dst, src, ageID)
+		if id.kind == KindPlugin {
+			payload, err = decryptOne(open(), ageID)
+		} else {
+			payload, err = crypt.Open(open(), ageID)
+		}
 		return err
 	})
 	if err != nil {
 		return 0, err
 	}
-	return n, nil
+	return io.Copy(dst, payload)
 }
 
 // Interactions returns the number of Unwrap attempts made through plugin

@@ -332,6 +332,76 @@ func TestMidCopyErrorLeavesNothing(t *testing.T) {
 	assertNoOutOrPartial(t, restore.OutPath)
 }
 
+type failOnceOutput struct {
+	w      io.Writer
+	failed bool
+}
+
+func (w *failOnceOutput) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		n, err := w.w.Write(p[:1])
+		if err != nil {
+			return n, err
+		}
+		return n, io.ErrUnexpectedEOF
+	}
+	return w.w.Write(p)
+}
+
+func TestRestoreWriteFailureCommitsNothing(t *testing.T) {
+	a, ar := mustNativeID(t)
+	b, br := mustNativeID(t)
+	bundle := filepath.Join(t.TempDir(), "bundle.txt")
+	if _, err := Bind(context.Background(), BindOptions{
+		Mode:          BindCreate,
+		IdentityPaths: []string{a, b},
+		Recipients:    []string{ar, br},
+		OutPath:       bundle,
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(t.TempDir(), "in.bin")
+	plain := []byte("review-fixture")
+	if err := os.WriteFile(in, plain, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shards := t.TempDir()
+	if _, err := Split(context.Background(), SplitOptions{
+		IdentityPath: bundle,
+		InPath:       in,
+		OutDir:       shards,
+		K:            3,
+		N:            5,
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+		return &failOnceOutput{w: w}
+	}
+	t.Cleanup(func() { testWrapDst = nil })
+	out := filepath.Join(t.TempDir(), "out.bin")
+	rep, err := Restore(context.Background(), RestoreOptions{
+		IdentityPaths: []string{bundle},
+		InDirs:        []string{shards},
+		OutPath:       out,
+	}, io.Discard)
+	if err == nil {
+		got, rerr := os.ReadFile(out)
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		t.Fatalf("restore committed after write failure: returned n=%d, fileSize=%d, expected=%d", rep.PlaintextLen, len(got), len(plain))
+	}
+	if rep != nil {
+		t.Fatalf("report set on error: PlaintextLen=%d", rep.PlaintextLen)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("errors.Is(., io.ErrUnexpectedEOF) = false: %v", err)
+	}
+	assertNoOutOrPartial(t, out)
+}
+
 func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
 	restore, _ := splitFixture(t)
 	want := make([]byte, 32)

@@ -2,6 +2,7 @@ package key
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -405,6 +406,142 @@ func TestSetDecryptToConsumedReaderFailsSecondAttempt(t *testing.T) {
 	if !bytes.Equal(dst.Bytes(), []byte(uiPlain)) {
 		t.Fatal("plaintext mismatch")
 	}
+}
+
+type failOnceWriter struct {
+	buf    bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceWriter) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		n, _ := w.buf.Write(p[:1])
+		return n, io.ErrUnexpectedEOF
+	}
+	return w.buf.Write(p)
+}
+
+func TestDecryptToCopyFailureIsNotRetried(t *testing.T) {
+	a, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Zero)
+	b, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Zero)
+	plain := []byte("review-fixture")
+	ct, err := crypt.EncryptBytes(plain, a.age.Recipient(), b.age.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Set{ids: []*Identity{a, b}}
+	var dst failOnceWriter
+	opens := 0
+	n, err := s.DecryptTo(&dst, func() io.Reader {
+		opens++
+		return bytes.NewReader(ct)
+	})
+	if err == nil {
+		t.Fatalf("write error was swallowed: returned n=%d, stored=%d, expected=%d", n, dst.buf.Len(), len(plain))
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("errors.Is(., io.ErrUnexpectedEOF) = false: %v", err)
+	}
+	if opens != 1 {
+		t.Fatalf("open calls = %d, want 1", opens)
+	}
+	if n != 1 || dst.buf.Len() != 1 {
+		t.Fatalf("n=%d stored=%d, want the single partial write", n, dst.buf.Len())
+	}
+}
+
+func TestSetDecryptToChunkFailureIsTerminal(t *testing.T) {
+	a, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Zero)
+	b, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Zero)
+	plain := []byte("review-fixture")
+	ct, err := crypt.EncryptBytes(plain, a.age.Recipient(), b.age.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The tail is the only chunk's Poly1305 tag. A header byte would fail
+	// selection and be retried; a tag failure is reported on read, after the
+	// header was accepted, and yields no plaintext.
+	ct[len(ct)-1] ^= 0x01
+	s := &Set{ids: []*Identity{a, b}}
+	opens := 0
+	var dst bytes.Buffer
+	n, err := s.DecryptTo(&dst, func() io.Reader {
+		opens++
+		return bytes.NewReader(ct)
+	})
+	if err == nil {
+		t.Fatal("err = nil, want chunk authentication error")
+	}
+	const chunkErr = "failed to decrypt and authenticate payload chunk"
+	if strings.Count(err.Error(), chunkErr) != 1 {
+		t.Fatalf("chunk error count = %d, want 1: %v", strings.Count(err.Error(), chunkErr), err)
+	}
+	if opens != 1 {
+		t.Fatalf("open calls = %d, want 1", opens)
+	}
+	if n != 0 || dst.Len() != 0 {
+		t.Fatalf("n=%d dst=%d, want 0 and empty", n, dst.Len())
+	}
+}
+
+// fixedFileKey reports a caller-chosen file key for every stanza, so the
+// header MAC fails instead of the identity being skipped as a non-match.
+type fixedFileKey struct{ key []byte }
+
+func (f fixedFileKey) Unwrap([]*age.Stanza) ([]byte, error) {
+	return f.key, nil
+}
+
+func TestSetDecryptToHeaderMACFailureIsRetried(t *testing.T) {
+	owner, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(owner.Zero)
+	fileKey := make([]byte, 16)
+	if _, err := rand.Read(fileKey); err != nil {
+		t.Fatal(err)
+	}
+	wrong := &Identity{native: fixedFileKey{key: fileKey}, kind: KindNative}
+	plain := []byte("review-fixture")
+	ct, err := crypt.EncryptBytes(plain, owner.age.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Set{ids: []*Identity{wrong, owner}}
+	opens := 0
+	var dst bytes.Buffer
+	n, err := s.DecryptTo(&dst, func() io.Reader {
+		opens++
+		return bytes.NewReader(ct)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opens != 2 {
+		t.Fatalf("open calls = %d, want 2", opens)
+	}
+	if n != int64(len(plain)) {
+		t.Fatalf("n = %d, want %d", n, len(plain))
+	}
+	assertSameBytes(t, dst.Bytes(), plain)
 }
 
 func TestSetDecryptNoTerminalStartsNoPlugin(t *testing.T) {

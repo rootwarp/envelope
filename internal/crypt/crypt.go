@@ -1,6 +1,5 @@
 // Package crypt encrypts and decrypts readers with age and counts ciphertext
-// bytes that actually flowed. Variadic recipients are the only change this
-// initiative makes here.
+// bytes that actually flowed.
 package crypt
 
 import (
@@ -36,15 +35,28 @@ func Encrypt(dst io.Writer, src io.Reader, rs ...age.Recipient) (n int64, err er
 	return 0, nil
 }
 
+// Open returns a reader for the plaintext of src. A nil error means the header
+// authenticated under the unwrapped file key. Chunks are authenticated later,
+// as the reader is read, so success here is not a claim that the payload is
+// intact.
+func Open(src io.Reader, id age.Identity) (io.Reader, error) {
+	r, err := age.Decrypt(src, id)
+	if err != nil {
+		return nil, wrapDecryptErr(err)
+	}
+	return r, nil
+}
+
 // Decrypt writes the plaintext of src to dst. The returned error includes
 // payload-chunk authentication failures that surface during the copy, not only
 // at header parse.
 func Decrypt(dst io.Writer, src io.Reader, id age.Identity) (n int64, err error) {
-	r, aerr := age.Decrypt(src, id)
-	if aerr != nil {
-		return 0, wrapDecryptErr(aerr)
+	r, err := Open(src, id)
+	if err != nil {
+		return 0, err
 	}
-	return io.Copy(dst, r)
+	n, err = io.Copy(dst, r)
+	return n, err
 }
 
 // EncryptBytes encrypts plaintext in memory for callers that hold a small blob
