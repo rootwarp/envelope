@@ -24,10 +24,11 @@ func TestReadLineSignalRestoresAbortsAndStops(t *testing.T) {
 }
 
 func assertSignalAborts(t *testing.T, secret bool) {
-	origGet, origRestore, origRead, origLine, origWatch, origStop := getState, restoreState, readPassword, readLine, watchSignal, signalStop
+	origGet, origRestore, origEcho, origRead, origLine, origWatch, origStop := getState, restoreState, noEcho, readPassword, readLine, watchSignal, signalStop
 	t.Cleanup(func() {
-		getState, restoreState, readPassword, readLine, watchSignal, signalStop = origGet, origRestore, origRead, origLine, origWatch, origStop
+		getState, restoreState, noEcho, readPassword, readLine, watchSignal, signalStop = origGet, origRestore, origEcho, origRead, origLine, origWatch, origStop
 	})
+	noEcho = func(int) error { return nil }
 
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
