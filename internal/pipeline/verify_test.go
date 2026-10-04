@@ -170,7 +170,11 @@ func TestVerifyResultClasses(t *testing.T) {
 // Payload tampered after reconstruction.
 func TestVerifyPayloadTamper(t *testing.T) {
 	restore, _, _ := splitSized(t, 4096)
-	testAtJoin = func(ct []byte, _ int64) {
+	opts := VerifyOptions{
+		IdentityPaths: restore.IdentityPaths,
+		InDirs:        []string{restore.InDirs[0]},
+	}
+	opts.deps.atJoin = func(ct []byte, _ int64) {
 		if !bytes.HasPrefix(ct, []byte("age-encryption.org/v1\n")) {
 			t.Fatal("joined ciphertext is not an age v1 header")
 		}
@@ -188,12 +192,8 @@ func TestVerifyPayloadTamper(t *testing.T) {
 		}
 		ct[i] ^= 0x01
 	}
-	t.Cleanup(func() { testAtJoin = nil })
 
-	rep, err := Verify(context.Background(), VerifyOptions{
-		IdentityPaths: restore.IdentityPaths,
-		InDirs:        []string{restore.InDirs[0]},
-	}, nil)
+	rep, err := Verify(context.Background(), opts, nil)
 	if rep == nil {
 		t.Fatal("report is nil")
 	}

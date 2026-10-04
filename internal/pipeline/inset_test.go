@@ -320,11 +320,9 @@ func TestConflictingManifests(t *testing.T) {
 	}
 
 	opened := 0
-	testAtLoadShard = func(string) { opened++ }
-	t.Cleanup(func() { testAtLoadShard = nil })
-
 	opts := restore
 	opts.InDirs = []string{dirA, dirB}
+	opts.deps.atLoadShard = func(string) { opened++ }
 	_, err = Restore(context.Background(), opts, io.Discard)
 	if !errors.Is(err, ErrConflictingManifests) {
 		t.Fatalf("errors.Is(., ErrConflictingManifests) = false, err=%v", err)

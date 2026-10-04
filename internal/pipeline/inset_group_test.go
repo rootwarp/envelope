@@ -62,8 +62,8 @@ func TestDecryptsEqualDistinctBlobs(t *testing.T) {
 	restore, split := splitFixture(t)
 	src := split.OutDir
 	dirs := []string{src, cloneSplitDir(t, src, split.N), cloneSplitDir(t, src, split.N)}
-	c := countOpens(t)
 	opts := restore
+	c := countOpens(t, &opts.deps)
 	opts.InDirs = dirs
 	if _, err := Restore(context.Background(), opts, io.Discard); err != nil {
 		t.Fatal(err)
@@ -90,9 +90,9 @@ func TestThreeDirsTwoBlobsCostTwoDecrypts(t *testing.T) {
 	dirC := t.TempDir()
 	reseal(t, restore.IdentityPaths[0], filepath.Join(src, "manifest.age"), filepath.Join(dirC, "manifest.age"))
 	copyShards(t, src, dirC, split.N)
-	c := countOpens(t)
 	opts := restore
 	opts.InDirs = []string{src, dirB, dirC}
+	c := countOpens(t, &opts.deps)
 	if _, err := Restore(context.Background(), opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -106,9 +106,9 @@ func TestResealedManifestCostsTwoDecrypts(t *testing.T) {
 	dirA := split.OutDir
 	dirB := t.TempDir()
 	reseal(t, restore.IdentityPaths[0], filepath.Join(dirA, "manifest.age"), filepath.Join(dirB, "manifest.age"))
-	c := countOpens(t)
 	opts := restore
 	opts.InDirs = []string{dirA, dirB}
+	c := countOpens(t, &opts.deps)
 	if _, err := Restore(context.Background(), opts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +120,13 @@ func TestResealedManifestCostsTwoDecrypts(t *testing.T) {
 func TestThreeDirIdenticalCopiesMatchOneDirInteractions(t *testing.T) {
 	skipWindows(t)
 	bundle, shards := v2PluginShardSet(t)
-	one := observeOpen(t)
-	if _, err := Verify(context.Background(), VerifyOptions{
+	oneOpts := VerifyOptions{
 		IdentityPaths: []string{bundle},
 		InDirs:        []string{shards},
 		Terminal:      stubTerm{},
-	}, io.Discard); err != nil {
+	}
+	one := observeOpen(t, &oneOpts.deps)
+	if _, err := Verify(context.Background(), oneOpts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	want := *one
@@ -134,12 +135,13 @@ func TestThreeDirIdenticalCopiesMatchOneDirInteractions(t *testing.T) {
 	}
 
 	dirs := []string{shards, cloneSplitDir(t, shards, 5), cloneSplitDir(t, shards, 5)}
-	three := observeOpen(t)
-	if _, err := Verify(context.Background(), VerifyOptions{
+	threeOpts := VerifyOptions{
 		IdentityPaths: []string{bundle},
 		InDirs:        dirs,
 		Terminal:      stubTerm{},
-	}, io.Discard); err != nil {
+	}
+	three := observeOpen(t, &threeOpts.deps)
+	if _, err := Verify(context.Background(), threeOpts, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if *three != want {
@@ -250,10 +252,10 @@ func TestWrongIdentityFirstErr(t *testing.T) {
 		}
 		assertChooseReplay(t, cands, wrongKeys, other, true)
 
-		c := countOpens(t)
 		opts := restore
 		opts.IdentityPaths = []string{other}
 		opts.InDirs = dirs
+		c := countOpens(t, &opts.deps)
 		_, err := Restore(context.Background(), opts, io.Discard)
 		want := crypt.ErrWrongIdentity.Error() + ": " + other
 		if err == nil || err.Error() != want {
@@ -285,15 +287,14 @@ func TestWrongIdentityFirstErr(t *testing.T) {
 func TestMixedV1V2ConflictingManifests(t *testing.T) {
 	bundle, v1Dir, v2Dir := mixedV1V2(t)
 	opened := 0
-	testAtLoadShard = func(string) { opened++ }
-	t.Cleanup(func() { testAtLoadShard = nil })
-
-	c := countOpens(t)
-	_, err := Restore(context.Background(), RestoreOptions{
+	opts := RestoreOptions{
 		IdentityPaths: []string{bundle},
 		InDirs:        []string{v1Dir, v2Dir},
 		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
-	}, io.Discard)
+	}
+	opts.deps.atLoadShard = func(string) { opened++ }
+	c := countOpens(t, &opts.deps)
+	_, err := Restore(context.Background(), opts, io.Discard)
 	if !errors.Is(err, ErrConflictingManifests) {
 		t.Fatalf("errors.Is(., ErrConflictingManifests) = false, err=%v", err)
 	}
@@ -340,23 +341,21 @@ func TestV1RepresentativeConsultsNoPin(t *testing.T) {
 	}
 }
 
-func countOpens(t *testing.T) *countingOpener {
+func countOpens(t *testing.T, d *deps) *countingOpener {
 	t.Helper()
 	c := &countingOpener{}
-	testWrapManifestOpener = func(inner manifest.Opener) manifest.Opener {
+	d.wrapManifestOpener = func(inner manifest.Opener) manifest.Opener {
 		c.inner = inner
 		return c
 	}
-	t.Cleanup(func() { testWrapManifestOpener = nil })
 	return c
 }
 
-func observeOpen(t *testing.T) *int {
+func observeOpen(t *testing.T, d *deps) *int {
 	t.Helper()
 	n := new(int)
 	*n = -1
-	ObserveOpenInteractions = func(got int) { *n = got }
-	t.Cleanup(func() { ObserveOpenInteractions = nil })
+	d.observeOpen = func(got int) { *n = got }
 	return n
 }
 

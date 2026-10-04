@@ -16,6 +16,8 @@ func defaultDeps() deps {
 	return deps{
 		openTerminal: func() (Terminal, error) { return holdPrompt{}, nil },
 		captureCtx:   func(ctx context.Context) { parkedCtx = ctx },
+		// The signal test execs this binary and cannot pass deps in. Park
+		// after the first plaintext write so a signal lands mid-copy.
 		wrapDst: func(ctx context.Context, w io.Writer) io.Writer {
 			return &holdAfterFirstWrite{ctx: ctx, w: w}
 		},
@@ -38,10 +40,8 @@ func defaultDeps() deps {
 //
 // Never run go test -tags envelope_signaltest ./...: every in-process restore
 // and every plugin PIN prompt would park until go test's own timeout.
-func init() {
-	testWrapDst = defaultDeps().wrapDst
-}
 
+// parkedCtx is the command context captureCtx stored for the plugin prompt.
 var parkedCtx context.Context
 
 const signalTestReadyEnv = "ENVELOPE_SIGNALTEST_READY"

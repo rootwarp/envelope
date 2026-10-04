@@ -58,8 +58,8 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 	defer func() {
-		if ObserveRunInteractions != nil {
-			ObserveRunInteractions(set.keys.Interactions())
+		if sess.deps.observeRun != nil {
+			sess.deps.observeRun(set.keys.Interactions())
 		}
 	}()
 
@@ -67,12 +67,12 @@ func Restore(ctx context.Context, opts RestoreOptions, status io.Writer) (*Resto
 		return nil, err
 	}
 
-	ct, err := set.ciphertext()
+	ct, err := set.ciphertext(sess.deps)
 	if err != nil {
 		return nil, err
 	}
 
-	n, err := decryptToFile(ctx, opts.OutPath, ct, set.keys)
+	n, err := decryptToFile(sess, opts.OutPath, ct, set.keys)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +156,12 @@ func openShardSet(sess *session, identityPaths []string, inDirs []string, scanAl
 	}
 	ok := false
 	defer func() {
-		if ObserveOpenInteractions != nil {
-			ObserveOpenInteractions(keys.Interactions())
+		if sess.deps.observeOpen != nil {
+			sess.deps.observeOpen(keys.Interactions())
 		}
 		if !ok {
-			if ObserveRunInteractions != nil {
-				ObserveRunInteractions(keys.Interactions())
+			if sess.deps.observeRun != nil {
+				sess.deps.observeRun(keys.Interactions())
 			}
 		}
 	}()
@@ -186,8 +186,8 @@ func openShardSet(sess *session, identityPaths []string, inDirs []string, scanAl
 	// across concurrent opens.
 	mk := keys.ManifestKeys()
 	op := manifest.Opener(mk)
-	if testWrapManifestOpener != nil {
-		op = testWrapManifestOpener(op)
+	if sess.deps.wrapManifestOpener != nil {
+		op = sess.deps.wrapManifestOpener(op)
 	}
 	m, err := chooseManifest(groups, order, mk, op, identitySource(keys, identityPaths), multi, sess.status)
 	if err != nil {
@@ -196,7 +196,7 @@ func openShardSet(sess *session, identityPaths []string, inDirs []string, scanAl
 
 	// Positional: compacting survivors makes ReconstructData and Join both
 	// return nil while emitting a different SHA-256.
-	shards, failed, missing, err := selectShards(sess.ctx, m, dirs, scanAll, multi, sess.status)
+	shards, failed, missing, err := selectShards(sess, m, dirs, scanAll, multi)
 	if err != nil {
 		return nil, err
 	}
@@ -228,9 +228,9 @@ func (s *shardSet) usableErr() error {
 	return nil
 }
 
-func (s *shardSet) ciphertext() ([]byte, error) {
-	if testAtReconstruct != nil {
-		testAtReconstruct(s.shards)
+func (s *shardSet) ciphertext(d deps) ([]byte, error) {
+	if d.atReconstruct != nil {
+		d.atReconstruct(s.shards)
 	}
 
 	enc, err := erasure.New(s.m.K, s.m.N)
@@ -245,8 +245,8 @@ func (s *shardSet) ciphertext() ([]byte, error) {
 	if err := enc.Join(&ct, s.shards, s.m.CiphertextLen); err != nil {
 		return nil, err
 	}
-	if testAtJoin != nil {
-		testAtJoin(ct.Bytes(), s.m.CiphertextLen)
+	if d.atJoin != nil {
+		d.atJoin(ct.Bytes(), s.m.CiphertextLen)
 	}
 	return ct.Bytes(), nil
 }
@@ -261,9 +261,9 @@ const (
 	shardUnusable
 )
 
-func loadShard(ctx context.Context, path string, stripeLen int64) ([]byte, shardRead, error) {
-	if testAtLoadShard != nil {
-		testAtLoadShard(path)
+func loadShard(ctx context.Context, path string, stripeLen int64, atLoad func(string)) ([]byte, shardRead, error) {
+	if atLoad != nil {
+		atLoad(path)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, shardLoaded, err
@@ -318,14 +318,15 @@ func readManifestBlob(path string) ([]byte, error) {
 
 // The named results exist for err alone — the deferred cleanup assigns to it.
 // Every error path returns n=0; a partial count is not a fact the caller may report.
-func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set) (n int64, err error) {
+func decryptToFile(sess *session, outPath string, ct []byte, keys *key.Set) (n int64, err error) {
+	ctx := sess.ctx
 	partial := outPath + ".partial"
 
 	// The transaction removes only what it created. Restore aborts until
 	// Commit publishes the partial. Split's error paths deliberately do not
 	// abort, so a crash between the shards and the manifest still leaves
 	// the shards.
-	t := filetxn.Begin(filepath.Dir(outPath), pipelineFileTxnOptions())
+	t := filetxn.Begin(filepath.Dir(outPath), sess.deps.txn)
 	// O_EXCL: never silently truncate a leftover .partial — that file holds plaintext.
 	f, err := t.Create(partial, 0o600)
 	if err != nil {
@@ -347,8 +348,8 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set
 	}
 
 	dst := io.Writer(f)
-	if testWrapDst != nil {
-		dst = testWrapDst(ctx, f)
+	if sess.deps.wrapDst != nil {
+		dst = sess.deps.wrapDst(ctx, f)
 	}
 	n, err = keys.DecryptTo(dst, func() io.Reader {
 		return ctxReader(ctx, bytes.NewReader(ct))
@@ -393,63 +394,4 @@ func (c *contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return c.r.Read(p)
-}
-
-// ObserveOpenInteractions receives the identity-side Unwrap count after
-// openShardSet finishes, before Zero on a failed return. Tests assert that
-// identical copies cost one decrypt site and that a v1 representative
-// consults no pin.
-var ObserveOpenInteractions func(int)
-
-// ObserveRunInteractions receives the identity-side Unwrap count at the end
-// of Restore or Verify (and of a failed openShardSet), before Zero. Tests
-// assert Interactions() stays within the announced bound, including identities
-// tried and rejected. Production does not branch on the value.
-var ObserveRunInteractions func(int)
-
-// testWrapManifestOpener wraps the opener chooseManifest uses. Tests count
-// decrypts of distinct blobs.
-var testWrapManifestOpener func(manifest.Opener) manifest.Opener
-
-// testAtLoadShard runs at the start of loadShard. Tests assert a conflicting
-// pair returns before any shard path is opened.
-var testAtLoadShard func(path string)
-
-// testAtReconstruct runs at the Reconstruct call site (after the survivor
-// count, before reconstruction). Tests assert len(shards)==n and index placement.
-var testAtReconstruct func(shards [][]byte)
-
-// testAtJoin observes the joined ciphertext. Tests assert length and SHA-256.
-// It may mutate ct in place; Verify's tamper test relies on it.
-var testAtJoin func(ct []byte, outSize int64)
-
-// testWrapDst wraps the decrypt destination. Tests inject a mid-copy error or
-// cancel the context after the first plaintext write, and the signal-test
-// build parks here.
-var testWrapDst func(context.Context, io.Writer) io.Writer
-
-// testRename replaces os.Rename. Tests inject a rename failure without setting
-// committed.
-var testRename func(oldpath, newpath string) error
-
-// testRemove replaces os.Remove of .partial during uncommitted cleanup. Tests
-// join the leftover-file error with the original diagnosis.
-var testRemove func(name string) error
-
-// testDirSync replaces the directory Sync. Tests inject ENOTSUP (restore must
-// still succeed) and EIO (restore must fail after commit).
-var testDirSync func() error
-
-// pipelineFileTxnOptions fills filetxn from the seams this package already
-// has. A nil hook stays nil so filetxn keeps os.Rename, os.Remove, or its
-// own directory sync.
-func pipelineFileTxnOptions() filetxn.Options {
-	o := filetxn.Options{
-		Rename: testRename,
-		Remove: testRemove,
-	}
-	if testDirSync != nil {
-		o.SyncDir = func(string) error { return testDirSync() }
-	}
-	return o
 }

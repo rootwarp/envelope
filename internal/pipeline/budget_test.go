@@ -197,11 +197,12 @@ func TestInteractionBudget(t *testing.T) {
 func TestBudgetNonInteractiveAbsent(t *testing.T) {
 	restore, _ := splitFixture(t)
 	var status bytes.Buffer
-	n := observeRun(t)
-	rep, err := Verify(context.Background(), VerifyOptions{
+	opts := VerifyOptions{
 		IdentityPaths: restore.IdentityPaths,
 		InDirs:        restore.InDirs,
-	}, &status)
+	}
+	n := observeRun(t, &opts.deps)
+	rep, err := Verify(context.Background(), opts, &status)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,8 +231,9 @@ func TestBudgetV1WithHardwareBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	openN := observeOpen(t)
-	st, n, catch, _, err := pluginVerify(t, []string{restore.IdentityPaths[0], bundle}, restore.InDirs)
+	var d deps
+	openN := observeOpen(t, &d)
+	st, n, catch, _, err := pluginVerify(t, []string{restore.IdentityPaths[0], bundle}, restore.InDirs, d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +277,72 @@ func TestBudgetNoPinOmitsQ(t *testing.T) {
 	if !strings.Contains(st, "this run needs 2 plugin interactions, each of which may prompt") {
 		t.Fatalf("q=0 status missing 2-interaction line:\n%s", st)
 	}
+}
+
+// TestBudgetObserversThroughDeps pins the counts both budget observers report
+// for one plugin identity with one manifest copy, a rejected identity tried
+// first, and two distinct manifest blobs.
+func TestBudgetObserversThroughDeps(t *testing.T) {
+	skipWindows(t)
+	bundle, shards := v2PluginShardSet(t)
+	bad := writePluginStub(t, "envtest", fakeplugin.ModeIncorrectIdentity)
+
+	t.Run("one identity one copy", func(t *testing.T) {
+		open, run := verifyObserverCounts(t, []string{bundle}, []string{shards})
+		if open != 2 || run != 3 {
+			t.Fatalf("verify open=%d run=%d, want 2 3", open, run)
+		}
+		open, run = restoreObserverCounts(t, []string{bundle}, []string{shards})
+		if open != 2 || run != 3 {
+			t.Fatalf("restore open=%d run=%d, want 2 3", open, run)
+		}
+	})
+
+	t.Run("first identity rejected", func(t *testing.T) {
+		open, run := verifyObserverCounts(t, []string{bad, bundle}, []string{shards})
+		if open != 4 || run != 6 {
+			t.Fatalf("open=%d run=%d, want 4 6", open, run)
+		}
+	})
+
+	t.Run("two manifest copies", func(t *testing.T) {
+		dirs := twoBlobDirs(t, bundle, shards)
+		open, run := verifyObserverCounts(t, []string{bundle}, dirs)
+		if open != 3 || run != 4 {
+			t.Fatalf("open=%d run=%d, want 3 4", open, run)
+		}
+	})
+}
+
+func verifyObserverCounts(t *testing.T, ids, dirs []string) (openCount, runCount int) {
+	t.Helper()
+	opts := VerifyOptions{
+		IdentityPaths: ids,
+		InDirs:        dirs,
+		Terminal:      stubTerm{},
+	}
+	openN := observeOpen(t, &opts.deps)
+	runN := observeRun(t, &opts.deps)
+	if _, err := Verify(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return *openN, *runN
+}
+
+func restoreObserverCounts(t *testing.T, ids, dirs []string) (openCount, runCount int) {
+	t.Helper()
+	opts := RestoreOptions{
+		IdentityPaths: ids,
+		InDirs:        dirs,
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
+		Terminal:      stubTerm{},
+	}
+	openN := observeOpen(t, &opts.deps)
+	runN := observeRun(t, &opts.deps)
+	if _, err := Restore(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return *openN, *runN
 }
 
 var (
@@ -362,12 +430,11 @@ func assertVerifyNPlus4(t *testing.T, rep *VerifyReport) {
 	}
 }
 
-func observeRun(t *testing.T) *int {
+func observeRun(t *testing.T, d *deps) *int {
 	t.Helper()
 	n := new(int)
 	*n = -1
-	ObserveRunInteractions = func(got int) { *n = got }
-	t.Cleanup(func() { ObserveRunInteractions = nil })
+	d.observeRun = func(got int) { *n = got }
 	return n
 }
 
@@ -387,28 +454,33 @@ func (w *budgetCatch) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-func pluginVerify(t *testing.T, ids, dirs []string) (status string, measured int, catch *budgetCatch, rep *VerifyReport, err error) {
+func pluginVerify(t *testing.T, ids, dirs []string, extra ...deps) (status string, measured int, catch *budgetCatch, rep *VerifyReport, err error) {
 	t.Helper()
-	n := observeRun(t)
-	catch = &budgetCatch{t: t, baseline: len(fakeplugin.Invocations(t))}
-	rep, err = Verify(context.Background(), VerifyOptions{
+	opts := VerifyOptions{
 		IdentityPaths: ids,
 		InDirs:        dirs,
 		Terminal:      stubTerm{},
-	}, catch)
+	}
+	if len(extra) > 0 {
+		opts.deps = extra[0]
+	}
+	n := observeRun(t, &opts.deps)
+	catch = &budgetCatch{t: t, baseline: len(fakeplugin.Invocations(t))}
+	rep, err = Verify(context.Background(), opts, catch)
 	return catch.buf.String(), *n, catch, rep, err
 }
 
 func pluginRestore(t *testing.T, ids, dirs []string) (status string, measured int, catch *budgetCatch, err error) {
 	t.Helper()
-	n := observeRun(t)
-	catch = &budgetCatch{t: t, baseline: len(fakeplugin.Invocations(t))}
-	_, err = Restore(context.Background(), RestoreOptions{
+	opts := RestoreOptions{
 		IdentityPaths: ids,
 		InDirs:        dirs,
 		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
 		Terminal:      stubTerm{},
-	}, catch)
+	}
+	n := observeRun(t, &opts.deps)
+	catch = &budgetCatch{t: t, baseline: len(fakeplugin.Invocations(t))}
+	_, err = Restore(context.Background(), opts, catch)
 	return catch.buf.String(), *n, catch, err
 }
 

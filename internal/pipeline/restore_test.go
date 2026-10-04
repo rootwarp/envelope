@@ -149,7 +149,7 @@ func TestShardsAtOriginalIndices(t *testing.T) {
 	}
 
 	called := false
-	testAtReconstruct = func(shards [][]byte) {
+	restore.deps.atReconstruct = func(shards [][]byte) {
 		called = true
 		if len(shards) != split.N {
 			t.Errorf("len(shards) = %d, want %d", len(shards), split.N)
@@ -174,7 +174,6 @@ func TestShardsAtOriginalIndices(t *testing.T) {
 			assertSameBytes(t, shards[i], want)
 		}
 	}
-	t.Cleanup(func() { testAtReconstruct = nil })
 
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)
@@ -201,7 +200,7 @@ func TestDigestScreenErases(t *testing.T) {
 	}
 
 	called := false
-	testAtReconstruct = func(shards [][]byte) {
+	restore.deps.atReconstruct = func(shards [][]byte) {
 		called = true
 		if len(shards) != split.N {
 			t.Errorf("len(shards) = %d, want %d", len(shards), split.N)
@@ -210,7 +209,6 @@ func TestDigestScreenErases(t *testing.T) {
 			t.Errorf("shards[%d] len = %d after Erase, want 0", idx, len(shards[idx]))
 		}
 	}
-	t.Cleanup(func() { testAtReconstruct = nil })
 
 	rep, err := Restore(context.Background(), restore, io.Discard)
 	if err != nil {
@@ -320,10 +318,9 @@ func TestRestoreDestinationMode(t *testing.T) {
 
 func TestMidCopyErrorLeavesNothing(t *testing.T) {
 	restore, _ := splitFixture(t)
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+	restore.deps.wrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
-	t.Cleanup(func() { testWrapDst = nil })
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, errInjectedCopy) {
@@ -376,15 +373,14 @@ func TestRestoreWriteFailureCommitsNothing(t *testing.T) {
 	}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
-		return &failOnceOutput{w: w}
-	}
-	t.Cleanup(func() { testWrapDst = nil })
 	out := filepath.Join(t.TempDir(), "out.bin")
 	rep, err := Restore(context.Background(), RestoreOptions{
 		IdentityPaths: []string{bundle},
 		InDirs:        []string{shards},
 		OutPath:       out,
+		deps: deps{wrapDst: func(_ context.Context, w io.Writer) io.Writer {
+			return &failOnceOutput{w: w}
+		}},
 	}, io.Discard)
 	if err == nil {
 		got, rerr := os.ReadFile(out)
@@ -412,10 +408,9 @@ func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+	restore.deps.wrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
-	t.Cleanup(func() { testWrapDst = nil })
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if err == nil {
@@ -432,14 +427,10 @@ func TestFailedRestoreLeavesExistingOutUntouched(t *testing.T) {
 func TestCleanupFailureJoinsErrors(t *testing.T) {
 	restore, _ := splitFixture(t)
 	partial := restore.OutPath + ".partial"
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+	restore.deps.wrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &failAfterN{w: w, left: 1, err: errInjectedCopy}
 	}
-	testRemove = func(string) error { return errInjectedRemove }
-	t.Cleanup(func() {
-		testWrapDst = nil
-		testRemove = nil
-	})
+	restore.deps.txn.Remove = func(string) error { return errInjectedRemove }
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, errInjectedCopy) {
@@ -457,10 +448,9 @@ func TestContextCancelMidCopy(t *testing.T) {
 	restore, _, _ := splitSized(t, 1<<20)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+	restore.deps.wrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &cancelOnWrite{w: w, cancel: cancel}
 	}
-	t.Cleanup(func() { testWrapDst = nil })
 
 	_, err := Restore(ctx, restore, io.Discard)
 	if err == nil {
@@ -476,10 +466,9 @@ func TestRestoreCancelOnFinalWriteCommitsNothing(t *testing.T) {
 	restore, _, _ := splitSized(t, 14)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+	restore.deps.wrapDst = func(_ context.Context, w io.Writer) io.Writer {
 		return &cancelOnWrite{w: w, cancel: cancel}
 	}
-	t.Cleanup(func() { testWrapDst = nil })
 
 	_, err := Restore(ctx, restore, io.Discard)
 	if err == nil || err.Error() != "payload: context canceled" {
@@ -493,8 +482,7 @@ func TestRestoreCancelOnFinalWriteCommitsNothing(t *testing.T) {
 
 func TestCommittedSetAfterRename(t *testing.T) {
 	restore, _ := splitFixture(t)
-	testRename = func(string, string) error { return errInjectedRename }
-	t.Cleanup(func() { testRename = nil })
+	restore.deps.txn.Rename = func(string, string) error { return errInjectedRename }
 
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, errInjectedRename) {
@@ -504,10 +492,19 @@ func TestCommittedSetAfterRename(t *testing.T) {
 }
 
 func TestSyncDirTolerantOfENOTSUP(t *testing.T) {
-	testDirSync = func() error { return syscall.ENOTSUP }
-	t.Cleanup(func() { testDirSync = nil })
-
-	restore, _ := splitFixture(t)
+	outDir := t.TempDir()
+	split := validOpts(t, outDir)
+	syncDir := func(string) error { return syscall.ENOTSUP }
+	split.deps.txn.SyncDir = syncDir
+	if _, err := Split(context.Background(), split, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	restore := RestoreOptions{
+		IdentityPaths: []string{split.IdentityPath},
+		InDirs:        []string{outDir},
+		OutPath:       filepath.Join(t.TempDir(), "out.bin"),
+	}
+	restore.deps.txn.SyncDir = syncDir
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -519,8 +516,7 @@ func TestSyncDirTolerantOfENOTSUP(t *testing.T) {
 
 func TestSyncDirEIOFailsAfterCommit(t *testing.T) {
 	restore, _, want := splitSized(t, 4096)
-	testDirSync = func() error { return syscall.EIO }
-	t.Cleanup(func() { testDirSync = nil })
+	restore.deps.txn.SyncDir = func(string) error { return syscall.EIO }
 	_, err := Restore(context.Background(), restore, io.Discard)
 	if !errors.Is(err, ErrDirSync) {
 		t.Fatalf("errors.Is(., ErrDirSync) = false, err=%v", err)
@@ -544,7 +540,7 @@ func TestJoinUsesManifestLength(t *testing.T) {
 	m := openSplitManifest(t, split)
 
 	called := false
-	testAtJoin = func(ct []byte, outSize int64) {
+	restore.deps.atJoin = func(ct []byte, outSize int64) {
 		called = true
 		if outSize != m.CiphertextLen {
 			t.Errorf("Join outSize = %d, CiphertextLen = %d", outSize, m.CiphertextLen)
@@ -554,7 +550,6 @@ func TestJoinUsesManifestLength(t *testing.T) {
 		}
 		assertSameBytes(t, ct, splitCT)
 	}
-	t.Cleanup(func() { testAtJoin = nil })
 
 	if _, err := Restore(context.Background(), restore, io.Discard); err != nil {
 		t.Fatal(err)
@@ -739,8 +734,7 @@ func TestRestoreTamperedMACEndToEnd(t *testing.T) {
 	restore, _, _ := splitSized(t, 4096)
 	// Reconstruction is the first step that could emit plaintext; it must not run.
 	reconstructed := false
-	testAtReconstruct = func([][]byte) { reconstructed = true }
-	t.Cleanup(func() { testAtReconstruct = nil })
+	restore.deps.atReconstruct = func([][]byte) { reconstructed = true }
 
 	p := filepath.Join(restore.InDirs[0], "manifest.age")
 	fi, err := os.Stat(p)

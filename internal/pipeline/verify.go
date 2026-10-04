@@ -87,8 +87,8 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 		return nil, err
 	}
 	defer func() {
-		if ObserveRunInteractions != nil {
-			ObserveRunInteractions(set.keys.Interactions())
+		if sess.deps.observeRun != nil {
+			sess.deps.observeRun(set.keys.Interactions())
 		}
 	}()
 
@@ -104,7 +104,7 @@ func Verify(ctx context.Context, opts VerifyOptions, status io.Writer) (*VerifyR
 		return rep, err
 	}
 
-	ct, err := set.ciphertext()
+	ct, err := set.ciphertext(sess.deps)
 	if err != nil {
 		rep.Result = VerifyUnrestorable
 		return rep, err

@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -270,7 +269,9 @@ const (
 //
 // Reporting keeps Phase 1's two-phase ORDER — every "unusable" line, then every
 // "failed digest" line — so a single-directory run is byte-identical.
-func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanAll bool, multi bool, status io.Writer) (shards [][]byte, failed, missing []int, err error) {
+func selectShards(sess *session, m *manifest.Manifest, dirs []inDir, scanAll bool, multi bool) (shards [][]byte, failed, missing []int, err error) {
+	ctx := sess.ctx
+	status := sess.status
 	shards = make([][]byte, m.N)
 	type reject struct {
 		index int
@@ -286,7 +287,7 @@ func selectShards(ctx context.Context, m *manifest.Manifest, dirs []inDir, scanA
 				break
 			}
 			p := filepath.Join(d.given, shardFileName(i))
-			b, read, rerr := loadShard(ctx, p, m.StripeLen)
+			b, read, rerr := loadShard(ctx, p, m.StripeLen, sess.deps.atLoadShard)
 			if rerr != nil {
 				return nil, nil, nil, rerr
 			}

@@ -123,7 +123,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	if entries, err := os.ReadDir(opts.OutDir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrOutDirNotEmpty, opts.OutDir)
 	}
-	if err := mkdirAllDurable(opts.OutDir, 0o700); err != nil {
+	if err := mkdirAllDurable(opts.OutDir, 0o700, sess.deps.txn); err != nil {
 		return nil, err
 	}
 	// 0700 &^ umask is 0700 for every realistic umask; Chmod is belt, kept
@@ -135,7 +135,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	// The transaction removes only what it created. Error paths deliberately
 	// do not abort, so a crash between the shards and the manifest still
 	// leaves the shards. Restore aborts until Commit publishes its partial.
-	txn := filetxn.Begin(opts.OutDir, pipelineFileTxnOptions())
+	txn := filetxn.Begin(opts.OutDir, sess.deps.txn)
 
 	in, err := os.Open(opts.InPath)
 	if err != nil {
@@ -394,7 +394,7 @@ func writeExclusive(txn *filetxn.Txn, path string, r io.Reader, extra io.Writer)
 	return os.Chmod(path, 0o644)
 }
 
-func mkdirAllDurable(path string, perm os.FileMode) error {
+func mkdirAllDurable(path string, perm os.FileMode, txn filetxn.Options) error {
 	path = filepath.Clean(path)
 	if path == "" || path == "." {
 		return nil
@@ -411,14 +411,14 @@ func mkdirAllDurable(path string, perm os.FileMode) error {
 	}
 	parent := filepath.Dir(path)
 	if parent != path {
-		if err := mkdirAllDurable(parent, perm); err != nil {
+		if err := mkdirAllDurable(parent, perm, txn); err != nil {
 			return err
 		}
 	}
 	if err := os.Mkdir(path, perm); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	return filetxn.Begin(parent, pipelineFileTxnOptions()).SyncDir()
+	return filetxn.Begin(parent, txn).SyncDir()
 }
 
 var (

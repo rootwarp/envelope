@@ -60,7 +60,7 @@ func TestRestoreCancelledPromptStopsPluginWalk(t *testing.T) {
 	restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
 	restore.Terminal = term
 
-	n := observeRun(t)
+	n := observeRun(t, &restore.deps)
 	_, err := Restore(ctx, restore, io.Discard)
 	if err == nil {
 		t.Fatal("err = nil, want cancel")

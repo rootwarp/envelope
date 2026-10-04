@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 
+	"github.com/rootwarp/envelope/internal/filetxn"
 	"github.com/rootwarp/envelope/internal/key"
+	"github.com/rootwarp/envelope/internal/manifest"
 )
 
 // session owns everything whose lifetime is one command and closes it once.
@@ -21,12 +23,44 @@ type session struct {
 }
 
 // deps is one run's seams. The zero value is production: the real terminal
-// opener and no context capture. Tests set deps on the command options.
+// opener, the real rename, remove and directory sync, and no observation.
 type deps struct {
 	openTerminal func() (Terminal, error)
 	captureCtx   func(context.Context)
-	// Restore reads testWrapDst, not this field. The signal-test build copies it out.
+
+	// wrapDst wraps the restore decrypt destination. The zero value writes
+	// plaintext straight to the file.
 	wrapDst func(context.Context, io.Writer) io.Writer
+
+	// wrapManifestOpener wraps the opener chooseManifest uses. The zero value
+	// opens each blob as-is.
+	wrapManifestOpener func(manifest.Opener) manifest.Opener
+
+	// atLoadShard runs at the start of every shard open. The zero value does
+	// nothing.
+	atLoadShard func(path string)
+
+	// atReconstruct runs after the survivor count and before reconstruction.
+	// The zero value does nothing.
+	atReconstruct func(shards [][]byte)
+
+	// atJoin observes the joined ciphertext. The zero value does nothing.
+	atJoin func(ct []byte, outSize int64)
+
+	// observeOpen receives the identity-side Unwrap count after openShardSet
+	// finishes, before the key set is zeroed on a failed return. The zero
+	// value records nothing.
+	observeOpen func(int)
+
+	// observeRun receives the identity-side Unwrap count at the end of Restore
+	// or Verify, and of a failed openShardSet, before the key set is zeroed.
+	// The zero value records nothing.
+	observeRun func(int)
+
+	// txn is copied into filetxn.Begin. The transaction stays with the writer.
+	// The zero value is production: os.Rename, os.Remove, and a directory sync
+	// that tolerates EINVAL and ENOTSUP.
+	txn filetxn.Options
 }
 
 func (d deps) withDefaults() deps {
@@ -39,6 +73,33 @@ func (d deps) withDefaults() deps {
 	}
 	if d.wrapDst != nil {
 		base.wrapDst = d.wrapDst
+	}
+	if d.wrapManifestOpener != nil {
+		base.wrapManifestOpener = d.wrapManifestOpener
+	}
+	if d.atLoadShard != nil {
+		base.atLoadShard = d.atLoadShard
+	}
+	if d.atReconstruct != nil {
+		base.atReconstruct = d.atReconstruct
+	}
+	if d.atJoin != nil {
+		base.atJoin = d.atJoin
+	}
+	if d.observeOpen != nil {
+		base.observeOpen = d.observeOpen
+	}
+	if d.observeRun != nil {
+		base.observeRun = d.observeRun
+	}
+	if d.txn.Rename != nil {
+		base.txn.Rename = d.txn.Rename
+	}
+	if d.txn.Remove != nil {
+		base.txn.Remove = d.txn.Remove
+	}
+	if d.txn.SyncDir != nil {
+		base.txn.SyncDir = d.txn.SyncDir
 	}
 	return base
 }
