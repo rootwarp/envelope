@@ -3,6 +3,7 @@ package key
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ type Set struct {
 	pinAmbiguous bool
 	ui           *ClientUI
 	term         TerminalSource
+	ctx          context.Context
 	nPaths       int
 	bundle       bool
 	interactions atomic.Int32
@@ -52,17 +54,41 @@ type attemptState struct {
 // Tests alias that buffer to prove it is cleared before KeyFor returns (I-4).
 var testObserveSeed func([]byte)
 
+type SetOption func(*Set)
+
+// WithContext keeps ctx on the Set for the whole run. Once ctx is cancelled,
+// no further plugin identity is tried, so an operator's Ctrl-C cannot start
+// a new plugin process. The default is context.Background().
+func WithContext(ctx context.Context) SetOption {
+	return func(s *Set) {
+		if ctx != nil {
+			s.ctx = ctx
+		}
+	}
+}
+
+func (s *Set) ctxErr() error {
+	if s == nil || s.ctx == nil {
+		return nil
+	}
+	return s.ctx.Err()
+}
+
 // LoadSet reads each path, routing AGE-PLUGIN- lines to plugin.NewIdentity and
 // the remainder to age.ParseIdentities in one call so its diagnostics stay
 // intact. plugin.NewIdentity starts no process. A path whose first non-empty
 // line is the bundle header is parsed as a bundle: LoadSet records that
 // bundle's mac_key_id, recipients and pin ciphertext (card-free) and does
 // not unwrap the pin.
-func LoadSet(paths []string, term TerminalSource) (*Set, error) {
+func LoadSet(paths []string, term TerminalSource, opts ...SetOption) (*Set, error) {
 	s := &Set{
 		term:   term,
 		ui:     NewClientUI(term),
 		nPaths: len(paths),
+		ctx:    context.Background(),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	var natives, plugins []*Identity
 	for _, path := range paths {

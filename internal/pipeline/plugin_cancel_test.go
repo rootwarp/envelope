@@ -16,6 +16,158 @@ import (
 	"github.com/rootwarp/envelope/test/fakeplugin"
 )
 
+type cancelReadTerm struct {
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (t *cancelReadTerm) Notify(string) {}
+
+func (t *cancelReadTerm) ReadLine(string, bool) (string, error) {
+	t.reads++
+	if t.reads == 1 {
+		t.cancel()
+		return "", context.Canceled
+	}
+	return fakeplugin.PIN, nil
+}
+
+func (t *cancelReadTerm) Close() error { panic("borrowed terminal Close called") }
+
+func TestRestoreCancelledPromptStopsPluginWalk(t *testing.T) {
+	skipWindows(t)
+	name := "envtest"
+	fakeplugin.Install(t, name)
+	restore, _ := splitFixture(t)
+	bundle := filepath.Join(t.TempDir(), "bundle.txt")
+	if _, err := Bind(context.Background(), BindOptions{
+		Mode: BindCreate,
+		IdentityPaths: []string{
+			writePluginStub(t, name, fakeplugin.ModePIN),
+			writePluginStub(t, name, fakeplugin.ModePIN),
+		},
+		Recipients: []string{fakeplugin.Recipient(name, fakeplugin.ModeOK)},
+		OutPath:    bundle,
+		Terminal:   stubTerm{},
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	term := &cancelReadTerm{cancel: cancel}
+	restore.IdentityPaths = []string{bundle}
+	restore.OutPath = filepath.Join(t.TempDir(), "out.bin")
+	restore.Terminal = term
+
+	n := observeRun(t)
+	_, err := Restore(ctx, restore, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want cancel")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false: %v", err)
+	}
+	if *n != 1 {
+		t.Fatalf("interactions = %d, want 1", *n)
+	}
+	if term.reads != 1 {
+		t.Fatalf("prompts = %d, want 1", term.reads)
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
+func TestSplitCancelledPromptStopsPluginWalk(t *testing.T) {
+	skipWindows(t)
+	name := "envtest"
+	fakeplugin.Install(t, name)
+	bundle := filepath.Join(t.TempDir(), "bundle.txt")
+	if _, err := Bind(context.Background(), BindOptions{
+		Mode: BindCreate,
+		IdentityPaths: []string{
+			writePluginStub(t, name, fakeplugin.ModePIN),
+			writePluginStub(t, name, fakeplugin.ModePIN),
+		},
+		Recipients: []string{fakeplugin.Recipient(name, fakeplugin.ModeOK)},
+		OutPath:    bundle,
+		Terminal:   stubTerm{},
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(t.TempDir(), "in.bin")
+	if err := os.WriteFile(in, []byte("cancel-walk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	term := &cancelReadTerm{cancel: cancel}
+	n := observeSplitSet(t)
+	out := t.TempDir()
+	_, err := Split(ctx, SplitOptions{
+		IdentityPath: bundle,
+		InPath:       in,
+		OutDir:       out,
+		K:            3,
+		N:            5,
+		Terminal:     term,
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want cancel")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false: %v", err)
+	}
+	if *n != 1 {
+		t.Fatalf("interactions = %d, want 1", *n)
+	}
+	if term.reads != 1 {
+		t.Fatalf("prompts = %d, want 1", term.reads)
+	}
+}
+
+func TestBindCancelledPromptStopsPluginWalk(t *testing.T) {
+	skipWindows(t)
+	name := "envtest"
+	fakeplugin.Install(t, name)
+	bundle := filepath.Join(t.TempDir(), "bundle.txt")
+	if _, err := Bind(context.Background(), BindOptions{
+		Mode: BindCreate,
+		IdentityPaths: []string{
+			writePluginStub(t, name, fakeplugin.ModePIN),
+			writePluginStub(t, name, fakeplugin.ModePIN),
+		},
+		Recipients: []string{fakeplugin.Recipient(name, fakeplugin.ModeOK)},
+		OutPath:    bundle,
+		Terminal:   stubTerm{},
+	}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	_, rec := mustNativeID(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	term := &cancelReadTerm{cancel: cancel}
+	before := len(fakeplugin.Invocations(t))
+	_, err := Bind(ctx, BindOptions{
+		Mode:       BindAddRecipient,
+		BundlePath: bundle,
+		Recipients: []string{rec},
+		Terminal:   term,
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("err = nil, want cancel")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("errors.Is(., context.Canceled) = false: %v", err)
+	}
+	if got := len(fakeplugin.Invocations(t)) - before; got != 1 {
+		t.Fatalf("plugin invocations = %d, want 1", got)
+	}
+	if term.reads != 1 {
+		t.Fatalf("prompts = %d, want 1", term.reads)
+	}
+}
+
 func TestProgrammaticCancelRefusedBeforePlugin(t *testing.T) {
 	skipWindows(t)
 	// Unwrap polls no context: a deadline cannot interrupt a blocked plugin

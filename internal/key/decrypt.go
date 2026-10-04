@@ -145,6 +145,11 @@ func (s *Set) eachIdentity(try func(*Identity, age.Identity) error) error {
 		}
 		id.resetAttempt()
 		if id.kind == KindPlugin {
+			// The gate runs before the attempt is begun and before the terminal is resolved.
+			if cerr := s.ctxErr(); cerr != nil {
+				errs = append(errs, cerr)
+				return errors.Join(errs...)
+			}
 			if s.ui == nil {
 				errs = append(errs, ErrNoTerminal)
 				continue

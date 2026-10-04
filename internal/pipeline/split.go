@@ -55,7 +55,7 @@ func Split(ctx context.Context, opts SplitOptions, status io.Writer) (*SplitRepo
 	captureTestContext(ctx)
 
 	src := terminalSource(opts.Terminal)
-	set, err := key.LoadSet([]string{opts.IdentityPath}, src)
+	set, err := key.LoadSet([]string{opts.IdentityPath}, src, key.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}

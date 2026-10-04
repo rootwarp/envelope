@@ -112,7 +112,7 @@ func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error
 	}
 
 	src := terminalSource(opts.Terminal)
-	set, err := key.LoadSet([]string{opts.BundlePath}, src)
+	set, err := key.LoadSet([]string{opts.BundlePath}, src, key.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}

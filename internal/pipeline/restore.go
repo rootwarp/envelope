@@ -135,7 +135,7 @@ func openShardSet(ctx context.Context, identityPaths []string, inDirs []string, 
 	groups, order := groupCandidates(cands)
 
 	src := terminalSource(term)
-	keys, err := key.LoadSet(identityPaths, src)
+	keys, err := key.LoadSet(identityPaths, src, key.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
