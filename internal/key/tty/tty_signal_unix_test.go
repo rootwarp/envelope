@@ -3,6 +3,7 @@
 package tty
 
 import (
+	"errors"
 	"os"
 	"os/signal"
 	"strings"
@@ -15,10 +16,17 @@ import (
 	"golang.org/x/term"
 )
 
+// Both read paths block in a read that nothing wakes on Linux: ReadLine must
+// return on the signal, not on the read.
 func TestReadLineSignalRestoresAbortsAndStops(t *testing.T) {
-	origGet, origRestore, origRead, origWatch, origStop := getState, restoreState, readPassword, watchSignal, signalStop
+	t.Run("secret", func(t *testing.T) { assertSignalAborts(t, true) })
+	t.Run("plain", func(t *testing.T) { assertSignalAborts(t, false) })
+}
+
+func assertSignalAborts(t *testing.T, secret bool) {
+	origGet, origRestore, origRead, origLine, origWatch, origStop := getState, restoreState, readPassword, readLine, watchSignal, signalStop
 	t.Cleanup(func() {
-		getState, restoreState, readPassword, watchSignal, signalStop = origGet, origRestore, origRead, origWatch, origStop
+		getState, restoreState, readPassword, readLine, watchSignal, signalStop = origGet, origRestore, origRead, origLine, origWatch, origStop
 	})
 
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
@@ -61,6 +69,12 @@ func TestReadLineSignalRestoresAbortsAndStops(t *testing.T) {
 		clear(buf)
 		return nil, err
 	}
+	readLine = func(f *os.File) (string, error) {
+		close(entered)
+		buf := make([]byte, 16)
+		_, err := f.Read(buf)
+		return "", err
+	}
 
 	tm := &Terminal{f: f}
 	type result struct {
@@ -69,7 +83,7 @@ func TestReadLineSignalRestoresAbortsAndStops(t *testing.T) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		line, err := tm.ReadLine("PIN: ", true)
+		line, err := tm.ReadLine("PIN: ", secret)
 		ch <- result{line, err}
 	}()
 
@@ -89,8 +103,8 @@ func TestReadLineSignalRestoresAbortsAndStops(t *testing.T) {
 		_ = tm.Close()
 		t.Fatal("ReadLine stayed blocked after SIGINT")
 	}
-	if got.err == nil {
-		t.Fatal("ReadLine returned success after SIGINT")
+	if !errors.Is(got.err, errInterrupted) {
+		t.Fatalf("ReadLine after SIGINT: err = %v, want errInterrupted", got.err)
 	}
 	if got.line != "" {
 		t.Fatal("ReadLine returned a secret after SIGINT")
