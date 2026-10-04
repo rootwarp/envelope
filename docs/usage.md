@@ -482,6 +482,7 @@ envelope bind -bundle bundle.txt -replace-identity stub.txt
 
 Create refuses to overwrite: `identity file already exists` (exit 1). The
 file is mode `0600`, valid UTF-8, and holds no 32-byte cleartext secret.
+Ctrl-C during `bind` leaves the bundle exactly as it was.
 
 #### The rotation trap
 

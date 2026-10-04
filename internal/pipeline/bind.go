@@ -54,17 +54,17 @@ func Bind(ctx context.Context, opts BindOptions, status io.Writer) (*BindReport,
 	_ = status
 	switch opts.Mode {
 	case BindCreate:
-		return bindCreate(opts)
+		return bindCreate(ctx, opts)
 	case BindAddRecipient:
-		return bindAddRecipient(opts)
+		return bindAddRecipient(ctx, opts)
 	case BindReplaceIdentity:
-		return bindReplaceIdentity(opts)
+		return bindReplaceIdentity(ctx, opts)
 	default:
 		return nil, errBindMode
 	}
 }
 
-func bindCreate(opts BindOptions) (*BindReport, error) {
+func bindCreate(ctx context.Context, opts BindOptions) (*BindReport, error) {
 	lines, err := readIdentityLines(opts.IdentityPaths)
 	if err != nil {
 		return nil, err
@@ -81,13 +81,18 @@ func bindCreate(opts BindOptions) (*BindReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// WriteNew's O_EXCL create is the commit. A cancel seen before it
+	// returns without creating OutPath.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := key.WriteNew(opts.OutPath, b); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.OutPath, b), nil
 }
 
-func bindAddRecipient(opts BindOptions) (*BindReport, error) {
+func bindAddRecipient(ctx context.Context, opts BindOptions) (*BindReport, error) {
 	b, err := key.ReadBundle(opts.BundlePath)
 	if err != nil {
 		return nil, err
@@ -121,13 +126,13 @@ func bindAddRecipient(opts BindOptions) (*BindReport, error) {
 	if ObserveBindInteractions != nil {
 		ObserveBindInteractions(set.Interactions())
 	}
-	if err := key.Replace(opts.BundlePath, b); err != nil {
+	if err := key.ReplaceContext(ctx, opts.BundlePath, b); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil
 }
 
-func bindReplaceIdentity(opts BindOptions) (*BindReport, error) {
+func bindReplaceIdentity(ctx context.Context, opts BindOptions) (*BindReport, error) {
 	b, err := key.ReadBundle(opts.BundlePath)
 	if err != nil {
 		return nil, err
@@ -139,7 +144,7 @@ func bindReplaceIdentity(opts BindOptions) (*BindReport, error) {
 	if err := b.ReplaceIdentities(lines); err != nil {
 		return nil, err
 	}
-	if err := key.Replace(opts.BundlePath, b); err != nil {
+	if err := key.ReplaceContext(ctx, opts.BundlePath, b); err != nil {
 		return nil, err
 	}
 	return bindReport(opts.BundlePath, b), nil

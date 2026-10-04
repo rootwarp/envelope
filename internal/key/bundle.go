@@ -3,6 +3,7 @@ package key
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
@@ -224,7 +225,18 @@ func WriteNew(path string, b *Bundle) error {
 
 // Replace writes path+".tmp" with WriteNew's sequence, then renames onto path
 // and syncs the directory — split's manifest commit sequence. Never in place.
+// It is ReplaceContext with a background context. Callers that can be
+// cancelled should use ReplaceContext.
 func Replace(path string, b *Bundle) error {
+	return ReplaceContext(context.Background(), path, b)
+}
+
+// ReplaceContext is the ctx-aware entry callers should use. It writes
+// path+".tmp" with WriteNew's sequence, then renames onto path and syncs the
+// directory. The commit point is that rename: a cancellation observed before
+// it aborts and removes only the temporary file this call created. One
+// observed after the rename lets the directory sync finish.
+func ReplaceContext(ctx context.Context, path string, b *Bundle) error {
 	data, err := marshalBundle(b)
 	if err != nil {
 		return err
@@ -240,6 +252,12 @@ func Replace(path string, b *Bundle) error {
 	rename := os.Rename
 	if ReplaceRename != nil {
 		rename = ReplaceRename
+	}
+	// The rename publishes. A cancel seen before it aborts and removes only
+	// this run's temp.
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
 	if err := rename(tmp, path); err != nil {
 		// A failed commit must not leave path.tmp: bind's interrupted

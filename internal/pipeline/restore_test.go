@@ -472,6 +472,25 @@ func TestContextCancelMidCopy(t *testing.T) {
 	assertNoOutOrPartial(t, restore.OutPath)
 }
 
+func TestRestoreCancelOnFinalWriteCommitsNothing(t *testing.T) {
+	restore, _, _ := splitSized(t, 14)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	testWrapDst = func(_ context.Context, w io.Writer) io.Writer {
+		return &cancelOnWrite{w: w, cancel: cancel}
+	}
+	t.Cleanup(func() { testWrapDst = nil })
+
+	_, err := Restore(ctx, restore, io.Discard)
+	if err == nil || err.Error() != "payload: context canceled" {
+		t.Fatalf("err = %v, want payload: context canceled", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal("errors.Is(., context.Canceled) = false")
+	}
+	assertNoOutOrPartial(t, restore.OutPath)
+}
+
 func TestCommittedSetAfterRename(t *testing.T) {
 	restore, _ := splitFixture(t)
 	testRename = func(string, string) error { return errInjectedRename }

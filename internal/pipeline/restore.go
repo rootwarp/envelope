@@ -351,6 +351,11 @@ func decryptToFile(ctx context.Context, outPath string, ct []byte, keys *key.Set
 	if err = f.Close(); err != nil { // Close can report deferred write errors
 		return 0, fmt.Errorf("close %s: %w", partial, err)
 	}
+	// The rename publishes. A cancel seen before it aborts and removes only
+	// this run's temp (the deferred cleanup deletes .partial).
+	if err = ctx.Err(); err != nil {
+		return 0, fmt.Errorf("payload: %w", err)
+	}
 
 	rename := os.Rename
 	if testRename != nil {
