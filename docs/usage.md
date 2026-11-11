@@ -319,6 +319,129 @@ envelope restore -identity identity.txt -in shards/ -out restored.bin
 cmp secret.bin restored.bin && echo identical
 ```
 
+## YubiKey example
+
+This example protects a file with a YubiKey and a paper recovery identity.
+Either one alone restores it. Read [Hardware identities](#hardware-identities)
+for the full rules. Use test material only (see the v0 usage policy).
+
+You need `age-plugin-yubikey` on `PATH` (see
+[Install the plugin](#install-the-plugin)). On Linux and BSD, `pcscd` must be
+running.
+
+```sh
+mkdir -p /tmp/envelope-yk && cd /tmp/envelope-yk
+dd if=/dev/urandom of=secret.bin bs=1048576 count=1
+age-plugin-yubikey --version
+```
+
+### 1. Make the key on the YubiKey
+
+Envelope never creates hardware keys. The plugin does:
+
+```sh
+age-plugin-yubikey --generate --pin-policy once --touch-policy cached > yk-stub.txt
+age-plugin-yubikey --list
+```
+
+`yk-stub.txt` is the identity stub: one `AGE-PLUGIN-YUBIKEY-1…` line with a
+serial, a slot, and a short fingerprint. It holds no private key. `--list`
+prints the public `age1yubikey1…` recipient. Copy that line:
+
+```sh
+YK=age1yubikey1…            # paste the recipient that --list printed
+```
+
+A key generated on the card cannot be backed up. For a key you can move to a
+replacement YubiKey, import it instead; see
+[Imported-key recovery](#imported-key-recovery). Then use
+`--identity --slot N` to write the stub, and `--list-all` to see the
+recipient.
+
+### 2. Make the paper recovery identity
+
+```sh
+envelope keygen -out paper.txt
+PAPER=$(envelope recipient -identity paper.txt)
+```
+
+### 3. Bind the bundle
+
+```sh
+envelope bind -identity yk-stub.txt -recipient "$YK" -recipient "$PAPER" -out bundle.txt
+envelope recipient -identity bundle.txt
+```
+
+`bind` does not use the card and prints nothing on success. `recipient` prints
+the two recorded recipients, `$YK` first, then `$PAPER`.
+
+### 4. Split
+
+Plug in the YubiKey:
+
+```sh
+envelope split -identity bundle.txt -in secret.bin -out shards/ -k 3 -n 5
+```
+
+The payload and the manifest are encrypted to `$YK` and `$PAPER` without the
+card. The card is needed only to unwrap the bundle's pin: enter the PIN when
+the plugin asks for it on the terminal. Then touch the key. Envelope shows no
+touch prompt; after five seconds it prints `waiting on age-plugin-yubikey...`.
+
+```
+encrypted N bytes
+wrote 5 shards to shards/
+```
+
+`N` is the file size plus a small age overhead.
+
+### 5. Restore with the YubiKey
+
+```sh
+rm shards/shard-03 shards/shard-04          # lose two shards
+envelope restore -identity bundle.txt -in shards/ -out restored.bin
+cmp secret.bin restored.bin && echo identical
+```
+
+Before any plugin starts, Envelope prints the plugin path and the
+interaction budget on stderr:
+
+```
+using /opt/homebrew/bin/age-plugin-yubikey
+this run needs 3 plugin interactions, each of which may prompt
+restored 1048576 bytes to restored.bin
+```
+
+With `--pin-policy once` and `--touch-policy cached`, that is usually one PIN
+and one touch.
+
+### 6. Restore with the paper identity
+
+Unplug the YubiKey. Put the paper identity first:
+
+```sh
+envelope restore -identity paper.txt -identity bundle.txt -in shards/ -out restored-paper.bin
+cmp secret.bin restored-paper.bin && echo identical
+```
+
+File identities are tried before the card, so this run never asks for the
+PIN. The budget line is still printed, but the run uses no plugin
+interactions. `bundle.txt` is still necessary: it holds
+the pin that authenticates the manifest. Without it, restore stops with
+`no identity bundle in this run; create one with envelope bind`.
+
+### What to keep
+
+| Keep | Where |
+|---|---|
+| The YubiKey | With you |
+| `paper.txt` | Offline, for example printed and locked away. It is a plaintext secret: delete the disk copy after you store it |
+| `bundle.txt` | Next to each copy of the paper identity, and anywhere else. It holds no secret, but without it **no** shard set restores |
+| Shards and `manifest.age` | In different places, with a `manifest.age` next to each shard |
+
+`yk-stub.txt` is not necessary after `bind`: the bundle holds its identity
+line.
+
 ## Help
 
 ```sh
